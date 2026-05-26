@@ -1,0 +1,21 @@
+# Generic FedSQL single-query job (Phase J.0).
+# Worker must call configure_worker(fedsql=FedSQLClient(...)) before polling.
+#
+#   python -m nexcraft_jobs.yaml_jobs run packages/nexcraft-jobs/examples/jobs/fedsql_query.example.yaml
+
+version: 1
+name: genieml-fedsql-demo
+workflow_type: nexcraft_fedsql_query
+task_queue: nexcraft-jobs
+temporal_target: localhost:7233
+workflow_id_prefix: genieml-fedsql
+wait_for_result: true
+
+input:
+  sql: |
+    SELECT 1 AS n, 'ok' AS status
+  source_id: preview
+  dialect: postgres
+  tenant_id: demo
+  row_limit: 1000
+  timeout_seconds: 120

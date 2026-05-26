@@ -1,0 +1,21 @@
+[project]
+name = "nexcraft-workspace"
+version = "0.0.0"
+requires-python = ">=3.11"
+description = "Workspace root for nexcraft packages (not published)."
+
+[tool.uv.workspace]
+members = [
+    "packages/nexcraft",
+    "packages/nexcraft-jobs",
+    "packages/nexcraft-driver",
+    "packages/ontology-foundry",
+    "packages/admin",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]

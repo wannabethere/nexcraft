@@ -1,0 +1,387 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{natbib}
+\usepackage{microtype}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue,
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8},
+}
+
+% --- Replace before submission ---
+\newcommand{\PaperTitle}{Markdown vs.\ Structured Context for LLM Tabular Grounding: A Pilot Study on Ontology Pipeline Artifacts}
+\newcommand{\AuthorName}{Your Name}
+\newcommand{\AuthorAffil}{ComplianceSpark / Nexcraft}
+\newcommand{\AuthorEmail}{you@example.com}
+\newcommand{\PaperDate}{May 2026}
+
+\title{\textbf{\PaperTitle}}
+\author{
+  \textbf{\AuthorName}\\
+  \textit{\AuthorAffil}\\
+  \texttt{\AuthorEmail}
+}
+\date{\PaperDate}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Enterprise ontology pipelines increasingly ground large language models (LLMs) on tabular metadata---column profiles, cardinality classes, and row samples---before enrichment stages such as data-protection classification and relationship inference.
+A recurring debate in the semantic-web community asks whether such grounding should use \emph{formal} representations (RDF, JSON-LD, OWL) or \emph{naturalistic} prose (Markdown)~\cite{tonyseale2025mcontology}.
+We hold the underlying semantics fixed in a canonical \texttt{TabularContextBundle} and compare only the \textbf{prompt serialization layer}: deterministic Markdown versus compact JSON, across four commercial models (OpenAI, Claude, Gemini, DeepSeek) and four invocation paths (native SDK, LangChain, procedural skill prompt, ontology-foundry provider).
+On a pilot benchmark of ten automatically graded factual questions over the \texttt{users\_core} table from a CSOD learning preview dataset, we report accuracy, latency, and qualitative failure modes.
+This paper documents the experimental design, open-source harness (\texttt{weekend\_bench.py}), and a reproducible arXiv submission path; \textbf{numeric results should be inserted after running the harness} (placeholders appear as \textbf{TBD} below).
+We argue for a \emph{dual serialization} strategy: structured interchange formats for machines and merge semantics; Markdown (or similarly LLM-oriented prose) for in-context grounding when the task is comprehension rather than logical entailment.
+\end{abstract}
+
+\noindent\textbf{Keywords:} ontology, knowledge graphs, large language models, tabular profiling, prompt engineering, RDF, Markdown, data governance
+
+\section{Introduction}
+\label{sec:intro}
+
+The term \emph{ontology} has become overloaded.
+In philosophy, ontology studies what exists; in computer science, Gruber~\cite{gruber1993ontology} defines an ontology as a \emph{formal, explicit specification of a shared conceptualization}.
+W3C standards---RDF, RDFS, OWL, SKOS---encode meaning so that reasoners can infer implicit facts (e.g., transitivity of part-of)~\cite{w3crdf11,w3cowl2}.
+Practitioners warn of ``McOntology''---labels and shallow taxonomies marketed as ontologies without axioms, shareability, or maintenance discipline~\cite{tonyseale2025mcontology}.
+
+Large language models complicate this picture.
+Retrieval-augmented and tool-augmented pipelines~\cite{lewis2020retrieval} inject domain context into prompts rather than into a reasoner.
+A popular question on professional networks is whether \emph{informal convergence} through shared foundation models substitutes for \emph{formal agreement} through shared ontologies---or whether formal semantics are simply digested invisibly into the GenAI stack.
+
+This work does not resolve the philosophical debate.
+Instead, we isolate an engineering question that arises in production systems such as \textbf{ontology-foundry} and \textbf{ontology-pipeline}:
+\begin{quote}
+  \emph{Given a fixed tabular semantic artifact, does the choice of in-prompt serialization (Markdown vs.\ JSON/RDF-shaped structure) affect LLM task accuracy, and does that effect depend on model vendor or client framework?}
+\end{quote}
+
+Our contributions are:
+\begin{enumerate}[leftmargin=*]
+  \item A \textbf{semantics-neutral} intermediate representation (\texttt{TabularContextBundle}) and two deterministic serializers (Markdown and JSON) used in enrichment prompts today.
+  \item A \textbf{reproducible weekend pilot harness} that runs factual QA with gold answers derived from stored column aggregates, supporting four models and four invocation runtimes.
+  \item A \textbf{positioned discussion} on dual serialization for ontology-backed LLM systems, with a roadmap toward RDF/Turtle arms and PII-classification tasks.
+\end{enumerate}
+
+\section{Background}
+\label{sec:background}
+
+\subsection{Formal ontologies and LLM context}
+RDF graphs and OWL axioms excel at interchange, versioning, and machine inference across organizations.
+Their cognitive and token costs for \emph{in-context} consumption by autoregressive LLMs are less well measured: triples are sparse, URI-heavy, and may not align with pretraining distributions~\cite{brown2020language}.
+Markdown-like tabular summaries, by contrast, mirror technical documentation and data dictionaries found abundantly in pretraining corpora.
+
+These representations are not mutually exclusive.
+A robust architecture may export OWL for governance and federation while rendering Markdown (or JSON) \emph{views} for LLM stages---analogous to materialized views over a canonical logical model.
+
+\subsection{TabularContextBundle in ontology-foundry}
+The \texttt{ontology-foundry} package profiles database columns (null rate, distinct count, numeric summaries, top-$k$ frequencies) and packages results in a \texttt{TabularContextBundle}:
+table identity, optional population metadata, per-column \texttt{ColumnContext} records, and a bounded row sample.
+The function \texttt{render\_tabular\_context} produces deterministic Markdown for prompts; no model calls occur during rendering.
+
+\subsection{ontology-pipeline enrichment}
+The \texttt{ontology-pipeline} threads the bundle through \texttt{EnrichmentContext} and injects grounding into stages such as:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Data protection} --- PII and sensitivity classification with \texttt{aggregates\_only} mode (no raw sample values pre-classification).
+  \item \textbf{Column semantics} --- business meaning and semantic units.
+  \item \textbf{Relationship and causal inference} --- cross-column and cross-asset hypotheses.
+\end{itemize}
+Preview runs on a CSOD learning dataset materialize MDL JSON, column aggregates, and samples under \texttt{output/preview/}.
+
+\section{Related work}
+\label{sec:related}
+
+\textbf{Structured LLM outputs.} Vendor APIs increasingly support JSON schema constraints~\cite{openai2024structured,anthropic2025claude,google2025gemini}, reducing parse failures in production pipelines.
+
+\textbf{Agent skills and frameworks.} Procedural system prompts (``skills'') specify step-by-step reasoning policies; orchestration frameworks such as LangChain~\cite{langchain2024} wrap heterogeneous providers behind a common \texttt{invoke} interface.
+We treat \emph{skill prompts} and \emph{framework wrappers} as experimental factors orthogonal to context format.
+
+\textbf{Grounding evaluation.} Our pilot uses factual QA with gold labels from profiler output---a strict subset of grounding metrics (numeric alignment, span overlap) implemented in \texttt{ontology\_foundry.eval.grounding}.
+
+\section{Method}
+\label{sec:method}
+
+\subsection{Design principle: one semantics, many serializations}
+All experimental arms share a single \texttt{TabularContextBundle} $B$ built from preview artifacts:
+\texttt{users\_core.aggregates.json} and \texttt{users\_core.samples.json}.
+Two serializers produce prompt context $C_{\mathrm{md}}$ and $C_{\mathrm{json}}$:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Markdown (M):} \texttt{render\_tabular\_context}$(B)$ --- section headers, cardinality interpretation text, embedded JSON sample block.
+  \item \textbf{JSON (J):} compact dictionary with parallel numeric fields per column and truncated \texttt{sample\_rows} (no interpretive prose).
+\end{itemize}
+A scripted validator (planned) will assert numeric parity between $C_{\mathrm{md}}$ and $C_{\mathrm{json}}$ for every reported statistic.
+
+\subsection{Task: factual tabular QA}
+Each trial presents $(C, q)$ to model $m$ under runtime $r$, requesting a JSON answer:
+\begin{lstlisting}
+{"answer": "<value>", "evidence_column": "<column_name>"}
+\end{lstlisting}
+If the fact is absent from $C$, the model should answer \texttt{UNKNOWN}.
+Ten questions (Table~\ref{tab:questions}) target columns in \texttt{users\_core}; gold answers are read directly from aggregate JSON (no hand labeling).
+
+\begin{table}[t]
+  \centering
+  \caption{Pilot benchmark questions (gold from column aggregates).}
+  \label{tab:questions}
+  \small
+  \begin{tabular}{@{}clcc@{}}
+    \toprule
+    ID & Question (abbrev.) & Column & Gold \\
+    \midrule
+    q01 & Distinct count & \texttt{user\_id} & 500 \\
+    q02 & Null rate (\%) & \texttt{user\_id} & 0.0 \\
+    q03 & Null rate (\%) & \texttt{user\_email} & 23.4 \\
+    q04 & Distinct count & \texttt{user\_gender} & 5 \\
+    q05 & Cardinality tier & \texttt{user\_gender} & low \\
+    q06 & Cardinality tier & \texttt{user\_guid} & identifier \\
+    q07 & Distinct count & \texttt{user\_address\_id} & 489 \\
+    q08 & Mean & \texttt{user\_appr\_id} & 10.664 \\
+    q09 & Maximum & \texttt{user\_appr\_id} & 505 \\
+    q10 & Profiled row count & \texttt{applicant\_archived\_flag} & 500 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Models}
+\label{sec:models}
+Four vendors represent open-weight API, frontier closed, and Google stack:
+\begin{center}
+  \small
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Label & Default model & API key env. \\
+    \midrule
+    OpenAI    & \texttt{gpt-4o-mini} (override via env.) & \texttt{OPENAI\_API\_KEY} \\
+    Claude    & \texttt{claude-sonnet-4-20250514} & \texttt{ANTHROPIC\_API\_KEY} \\
+    Gemini    & \texttt{gemini-2.0-flash} & \texttt{GOOGLE\_API\_KEY} \\
+    DeepSeek  & \texttt{deepseek-chat} & \texttt{DEEPSEEK\_API\_KEY} \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+Temperature is fixed at $0$; structured JSON is requested where the API supports it.
+
+\subsection{Invocation runtimes}
+\label{sec:runtimes}
+We compare \emph{how} the model is called, holding $(C, q)$ constant:
+\begin{description}[leftmargin=2.2cm,style=nextline]
+  \item[\textbf{native}] Vendor SDK directly (\texttt{openai}, \texttt{anthropic}, \texttt{google.genai}).
+  \item[\textbf{langchain}] \texttt{ChatOpenAI}, \texttt{ChatAnthropic}, \texttt{ChatGoogleGenerativeAI}.
+  \item[\textbf{skill}] Native SDK plus a procedural system prompt (\texttt{weekend\_skill\_system.txt}) specifying column lookup steps, percent conversion, and JSON-only replies.
+  \item[\textbf{foundry}] \texttt{ontology\_foundry.llm.OpenAIChatProvider} with Pydantic-validated JSON (OpenAI and DeepSeek only).
+\end{description}
+
+\subsection{Metrics}
+\textbf{Primary:} accuracy --- fraction of questions where parsed \texttt{answer} matches gold under type-specific rules (integer equality, float tolerance, percent with fraction normalization).
+
+\textbf{Secondary:} median latency (ms); optional token counts when APIs expose usage.
+
+\textbf{Planned ablations (post-pilot):} token-matched truncation; Turtle/JSON-LD arms; PII classification F1; multi-table expansion.
+
+\subsection{Experimental matrix}
+Let $|\mathcal{M}|=4$ models, $|\mathcal{R}|=4$ runtimes (foundry only on two models), $|\mathcal{F}|=2$ formats, $|\mathcal{Q}|=10$ questions.
+The full factorial is up to $4 \times 4 \times 2 \times 10 = 320$ API calls; the harness supports \texttt{--quick} (subset) and \texttt{--resume} for incremental CSV logging.
+
+\section{Implementation}
+\label{sec:impl}
+
+\subsection{Software artifacts}
+\begin{itemize}[leftmargin=*]
+  \item \texttt{ontology-foundry/context/table\_bundle.py} --- bundle schema and Markdown renderer.
+  \item \texttt{ontology-pipeline/enrich/grounding.py} --- \texttt{format\_tabular\_grounding} wrapper for enricher prompts.
+  \item \texttt{scripts/weekend\_bench.py} --- CLI experiment runner.
+  \item \texttt{scripts/weekend\_plot.py} --- accuracy charts for dissemination.
+\end{itemize}
+
+\subsection{Results logging}
+Each trial appends one CSV row:
+\texttt{question\_id, model, runtime, format, correct, answer, gold, latency\_ms, model\_id, error}.
+Summaries aggregate by format, model, runtime, and triple interactions.
+
+\section{Results}
+\label{sec:results}
+
+\noindent\textbf{Instructions for authors.}
+Run the harness after setting API keys, then replace \textbf{TBD} cells in Table~\ref{tab:main} from \texttt{weekend\_bench.py --summarize-only} or the generated plots.
+Example command sequence appears in Appendix~\ref{app:repro}.
+
+\begin{table}[t]
+  \centering
+  \caption{Pilot accuracy (\%) by model and context format, averaged over questions and runtimes unless noted. \textbf{Fill from CSV after experiment.}}
+  \label{tab:main}
+  \begin{tabular}{@{}lcc@{}}
+    \toprule
+    Model & Markdown (M) & JSON (J) \\
+    \midrule
+    OpenAI   & TBD & TBD \\
+    Claude   & TBD & TBD \\
+    Gemini   & TBD & TBD \\
+    DeepSeek & TBD & TBD \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \caption{Accuracy (\%) by invocation runtime (aggregated over models and formats).}
+  \label{tab:runtime}
+  \begin{tabular}{@{}lc@{}}
+    \toprule
+    Runtime & Accuracy \\
+    \midrule
+    native    & TBD \\
+    langchain & TBD \\
+    skill     & TBD \\
+    foundry   & TBD \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% Uncomment after running weekend_plot.py:
+% \begin{figure}[t]
+%   \centering
+%   \includegraphics[width=0.95\linewidth]{../../results/weekend_TIMESTAMP_overview.png}
+%   \caption{Overview dashboard (model, format, runtime breakdown).}
+%   \label{fig:overview}
+% \end{figure}
+
+\subsection{Hypotheses and interpretation guide}
+\textbf{H1 (format):} Markdown exceeds JSON on factual QA when prose interpretation (cardinality tier text) is required (q05--q06).
+
+\textbf{H2 (model):} Frontier models show smaller format gaps than economical APIs.
+
+\textbf{H3 (runtime):} Skill prompts improve JSON arm more than Markdown by compensating for sparse structure.
+
+\textbf{H4 (null result):} If differences fall within run-to-run noise, serialization may be second-order relative to model choice---still a publishable pilot outcome.
+
+Report failure modes anecdotally: conflating fraction vs.\ percent null rates (q03), ignoring \texttt{identifier} tier vocabulary, hallucinating columns absent from $C$.
+
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Dual serialization}
+RDF/OWL remain the right interchange layer for federated ontologies, axiom maintenance, and reasoner-backed QA.
+Markdown (or LLM-oriented JSON \emph{views}) are prompt-layer materializations of the same bundle---not replacements for formal semantics.
+Production ontology-pipeline deployments already implement this split: MDL and aggregates persist structurally; enrichers consume Markdown grounding.
+
+\subsection{Relation to ``McOntology'' discourse}
+Demonstrating measurable differences (or principled null results) under controlled semantics addresses calls for \emph{practical utility showcases} rather than definitional arguments alone.
+LinkedIn and technical preprints can link to the open harness as a reproducible artifact.
+
+\subsection{Client frameworks and skills}
+LangChain and native SDKs should be benchmarked separately: wrapping overhead and default message templates may shift JSON compliance.
+Procedural skill prompts test whether lightweight ``agent policy'' substitutes for format affordances---relevant to Claude-style product features and internal Cursor skills.
+
+\section{Limitations}
+\label{sec:limits}
+\begin{itemize}[leftmargin=*]
+  \item Single table (\texttt{users\_core}), English prompts, one domain (HR/learning).
+  \item No RDF/Turtle arm in the pilot (JSON only as structured proxy).
+  \item No token-matched comparison; longer Markdown may confound accuracy with budget.
+  \item API versions drift; models named here may be superseded.
+  \item Automated grading does not capture enrichment quality (PII F1, relationship precision).
+\end{itemize}
+
+\section{Future work}
+\label{sec:future}
+\begin{enumerate}[leftmargin=*]
+  \item Add Turtle and JSON-LD serializers; optional OWL reasoner pre-pass arm.
+  \item Token-parity truncation and cost-accuracy Pareto curves.
+  \item Tasks T1--T3 aligned with \texttt{DataProtectionEnricher} and relationship inference with human gold.
+  \item Multi-table CSOD preview and public benchmarks (e.g., TPC-H subsets).
+  \item Regression gates via \texttt{ontology\_foundry.eval} for CI release blocking.
+\end{enumerate}
+
+\section{Conclusion}
+We presented a controlled pilot for comparing Markdown and JSON serializations of a shared \texttt{TabularContextBundle} across four LLM vendors and four invocation runtimes, grounded in ontology-foundry and ontology-pipeline production code.
+The benchmark is intentionally small but reproducible; authors insert empirical results after a weekend run.
+Whether Markdown wins, JSON wins, or format is neutral, the recommendation is the same: \textbf{keep formal semantics in the bundle and interchange layer; choose prompt serialization empirically for each task and model.}
+
+\section*{Acknowledgments}
+Replace with funding, reviewers, and dataset providers.
+
+\section*{Code availability}
+\begin{lstlisting}[language=bash]
+# Repository paths (monorepo nexcraft):
+packages/ontology-foundry/
+packages/ontology-pipeline/scripts/weekend_bench.py
+packages/ontology-pipeline/scripts/weekend_plot.py
+packages/ontology-pipeline/paper/arxiv/
+\end{lstlisting}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\section{Reproduction checklist}
+\label{app:repro}
+
+\begin{lstlisting}[language=bash]
+cd packages/ontology-pipeline
+python3 -m venv .venv-weekend && source .venv-weekend/bin/activate
+pip install -e "../ontology-foundry[llm,langchain,tabular]" \
+  -r scripts/requirements-weekend.txt
+
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export GOOGLE_API_KEY=...
+export DEEPSEEK_API_KEY=...
+
+python scripts/weekend_bench.py --dry-run
+python scripts/weekend_bench.py --quick          # smoke test
+python scripts/weekend_bench.py --resume --plot  # full pilot
+
+python scripts/weekend_plot.py --latest --chart all
+# Update Table 1-2 in main.tex from printed summary
+
+cd paper/arxiv && make   # builds main.pdf
+\end{lstlisting}
+
+\section{Grading rules}
+\label{app:grade}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{integer:} rounded equality.
+  \item \textbf{float:} relative tolerance $2\%$ with absolute floor $0.01$.
+  \item \textbf{percent:} accept answer as percent (23.4) or fraction (0.234) when question requests percentage.
+  \item \textbf{text:} case-insensitive match on cardinality tier labels.
+\end{itemize}
+
+\section{Prompt templates}
+\label{app:prompts}
+\textbf{User template (all runtimes):}
+\begin{lstlisting}
+Answer ONLY from the context below. If the fact is missing,
+set answer to UNKNOWN.
+Reply with a single JSON object:
+{"answer": "<value>", "evidence_column": "<column>"}
+
+CONTEXT:
+<serialized bundle>
+
+QUESTION: <q>
+\end{lstlisting}
+
+\textbf{Skill system prompt} (skill runtime only): see \texttt{scripts/weekend\_skill\_system.txt}.
+
+\end{document}

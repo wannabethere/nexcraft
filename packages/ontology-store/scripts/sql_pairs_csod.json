@@ -1,0 +1,65 @@
+[
+  {
+    "id": "csod_overdue_assigned_users_distinct",
+    "question": "How many distinct users have overdue assigned training?",
+    "sql": "SELECT COUNT(DISTINCT t.transc_user_id) AS overdue_user_count\nFROM transcript_core AS t\nWHERE t.is_assigned = TRUE\n  AND t.is_removed = FALSE\n  AND t.is_latest_reg_num = TRUE\n  AND t.user_lo_min_due_date IS NOT NULL\n  AND t.user_lo_min_due_date < CURRENT_DATE\n  AND (t.user_lo_comp_dt IS NULL OR t.user_lo_comp_dt > t.user_lo_min_due_date);",
+    "instructions": "The per-user assignment record lives on transcript_core, NOT on training_assignment_core (which has no user column). A user's training is overdue when the transcript's per-user due date (user_lo_min_due_date) is in the past and it is either incomplete (user_lo_comp_dt IS NULL) or was completed late (user_lo_comp_dt > user_lo_min_due_date). The user key is transc_user_id; reg_num is a registration-attempt counter, NOT a user id — never COUNT(DISTINCT reg_num) for users. Deduplicate re-registrations with is_latest_reg_num = TRUE and exclude removed items with is_removed = FALSE. 'Assigned' = is_assigned = TRUE.",
+    "references_asset_rks": [
+      "postgres://csod-local.csod_learning/public/transcript_core"
+    ],
+    "concepts": ["overdue_training", "training_compliance", "assigned_training"],
+    "key_areas": ["learning", "compliance"],
+    "source_provenance": "curated_join_pattern"
+  },
+  {
+    "id": "csod_overdue_vs_on_time_users",
+    "question": "How many users are overdue on their assigned training, compared to users who completed training on time?",
+    "sql": "WITH latest_assigned AS (\n  SELECT t.transc_user_id, t.user_lo_min_due_date, t.user_lo_comp_dt\n  FROM transcript_core AS t\n  WHERE t.is_assigned = TRUE\n    AND t.is_removed = FALSE\n    AND t.is_latest_reg_num = TRUE\n    AND t.user_lo_min_due_date IS NOT NULL\n)\nSELECT\n  COUNT(DISTINCT transc_user_id) FILTER (\n    WHERE user_lo_min_due_date < CURRENT_DATE\n      AND (user_lo_comp_dt IS NULL OR user_lo_comp_dt > user_lo_min_due_date)\n  ) AS overdue_users,\n  COUNT(DISTINCT transc_user_id) FILTER (\n    WHERE user_lo_comp_dt IS NOT NULL\n      AND user_lo_comp_dt <= user_lo_min_due_date\n  ) AS completed_on_time_users\nFROM latest_assigned;",
+    "instructions": "A comparison question returns exactly two values: one count of overdue users and one count of on-time users. Compute both from transcript_core in a single pass using COUNT(DISTINCT transc_user_id) FILTER (...). Overdue = due date passed and not completed (or completed after the due date). On time = completed on or before the per-user due date (user_lo_min_due_date). Do NOT join transcript_core to training_assignment_core on object_id to count users — that join is on the course (object_id), produces a many-to-many cartesian product across all users of the course, and double-counts. transcript_core alone already encodes the per-user assignment.",
+    "references_asset_rks": [
+      "postgres://csod-local.csod_learning/public/transcript_core"
+    ],
+    "concepts": ["overdue_training", "on_time_completion", "training_compliance"],
+    "key_areas": ["learning", "compliance"],
+    "source_provenance": "curated_join_pattern"
+  },
+  {
+    "id": "csod_overdue_users_named",
+    "question": "List the users who are overdue on mandatory training, with their names and email.",
+    "sql": "SELECT DISTINCT u.user_id, u.user_name_first, u.user_name_last, u.user_email\nFROM transcript_core AS t\nJOIN users_core AS u ON u.user_id = t.transc_user_id\nWHERE t.is_assigned = TRUE\n  AND t.is_required = TRUE\n  AND t.is_removed = FALSE\n  AND t.is_latest_reg_num = TRUE\n  AND t.user_lo_min_due_date IS NOT NULL\n  AND t.user_lo_min_due_date < CURRENT_DATE\n  AND (t.user_lo_comp_dt IS NULL OR t.user_lo_comp_dt > t.user_lo_min_due_date);",
+    "instructions": "Join transcript_core to users_core on users_core.user_id = transcript_core.transc_user_id (transc_user_id is the user foreign key; user_id is the users_core primary key). 'Mandatory'/'required' training is is_required = TRUE; 'assigned' is is_assigned = TRUE. Use the per-user due date user_lo_min_due_date for the overdue test. SELECT DISTINCT on the user columns so a user with several overdue items appears once.",
+    "references_asset_rks": [
+      "postgres://csod-local.csod_learning/public/transcript_core",
+      "postgres://csod-local.csod_learning/public/users_core"
+    ],
+    "concepts": ["overdue_training", "mandatory_training", "user_directory"],
+    "key_areas": ["learning", "compliance", "people"],
+    "source_provenance": "curated_join_pattern"
+  },
+  {
+    "id": "csod_overdue_by_ou",
+    "question": "How many users have overdue assigned training, broken down by organizational unit?",
+    "sql": "SELECT o.ou_id, COUNT(DISTINCT t.transc_user_id) AS overdue_user_count\nFROM transcript_core AS t\nJOIN user_ou_core AS uo ON uo.user_id = t.transc_user_id\nJOIN ou_core AS o ON o.ou_id = uo.ou_id\nWHERE t.is_assigned = TRUE\n  AND t.is_removed = FALSE\n  AND t.is_latest_reg_num = TRUE\n  AND t.user_lo_min_due_date IS NOT NULL\n  AND t.user_lo_min_due_date < CURRENT_DATE\n  AND (t.user_lo_comp_dt IS NULL OR t.user_lo_comp_dt > t.user_lo_min_due_date)\nGROUP BY o.ou_id\nORDER BY overdue_user_count DESC;",
+    "instructions": "Organizational unit membership is the bridge user_ou_core (user_id, ou_id) joined to ou_core (ou_id is the primary key). Chain: transcript_core.transc_user_id = user_ou_core.user_id, and user_ou_core.ou_id = ou_core.ou_id. Count distinct users per OU. A user may belong to multiple OUs, which can attribute them to more than one unit — that is expected for an OU rollup.",
+    "references_asset_rks": [
+      "postgres://csod-local.csod_learning/public/transcript_core",
+      "postgres://csod-local.csod_learning/public/user_ou_core",
+      "postgres://csod-local.csod_learning/public/ou_core"
+    ],
+    "concepts": ["overdue_training", "org_unit_rollup", "training_compliance"],
+    "key_areas": ["learning", "compliance", "org_structure"],
+    "source_provenance": "curated_join_pattern"
+  },
+  {
+    "id": "csod_on_time_completion_rate",
+    "question": "What is the on-time completion rate for assigned training?",
+    "sql": "WITH latest_assigned AS (\n  SELECT t.transc_user_id, t.user_lo_min_due_date, t.user_lo_comp_dt\n  FROM transcript_core AS t\n  WHERE t.is_assigned = TRUE\n    AND t.is_removed = FALSE\n    AND t.is_latest_reg_num = TRUE\n    AND t.user_lo_min_due_date IS NOT NULL\n)\nSELECT\n  COUNT(*) FILTER (\n    WHERE user_lo_comp_dt IS NOT NULL AND user_lo_comp_dt <= user_lo_min_due_date\n  )::numeric\n  / NULLIF(COUNT(*), 0) AS on_time_completion_rate\nFROM latest_assigned;",
+    "instructions": "Completion-rate questions are a ratio: on-time completions over total assigned items. Use the per-assignment grain (one row per latest, non-removed assigned transcript item) rather than per-user here, because a rate is over assignments. On time = user_lo_comp_dt IS NOT NULL AND user_lo_comp_dt <= user_lo_min_due_date. Cast to numeric and guard the denominator with NULLIF(..., 0) to avoid divide-by-zero.",
+    "references_asset_rks": [
+      "postgres://csod-local.csod_learning/public/transcript_core"
+    ],
+    "concepts": ["completion_rate", "on_time_completion", "training_compliance"],
+    "key_areas": ["learning", "compliance"],
+    "source_provenance": "curated_join_pattern"
+  }
+]

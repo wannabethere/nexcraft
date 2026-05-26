@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nexcraft-admin"
+version = "0.1.0"
+description = "Administrative configuration and runtime settings for Nexcraft packages."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "ontology-foundry>=0.1.0,<0.2",
+]
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6.0"]
+dev = ["pytest>=8.0", "ruff>=0.8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["nexcraft_admin"]
+
+[tool.uv.sources]
+ontology-foundry = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

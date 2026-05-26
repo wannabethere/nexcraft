@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ontology-store"
+version = "0.1.0"
+description = "Shared persistence layer for the ontology foundry — SQLAlchemy models, DAO, and Pydantic schemas for the hierarchy spine + extensions + annotations. Used by ontology-pipeline (writers) and ontology-retrieval (readers)."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "pydantic>=2.8",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.13",
+    "structlog>=24.0",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+vector = [
+    "ontology-foundry[langchain,llm]>=0.1.0",
+    "qdrant-client>=1.10",
+    "langchain-core>=0.3",
+    "langchain-community>=0.3",
+    "langchain-qdrant>=0.2",
+    "langchain-openai>=0.2",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "mypy>=1.10",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+ontology-store = "ontology_store.cli:main"
+
+[tool.uv.sources]
+ontology-foundry = { path = "../ontology-foundry", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["ontology_store"]

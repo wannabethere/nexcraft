@@ -1,0 +1,72 @@
+[
+  {
+    "id": "q01",
+    "question": "How many distinct values does column user_id have in the profiled sample?",
+    "column": "user_id",
+    "gold": "500",
+    "kind": "integer"
+  },
+  {
+    "id": "q02",
+    "question": "What is the null rate of column user_id expressed as a percentage (one decimal place)?",
+    "column": "user_id",
+    "gold": "0.0",
+    "kind": "percent"
+  },
+  {
+    "id": "q03",
+    "question": "What is the null rate of column user_email expressed as a percentage (one decimal place)?",
+    "column": "user_email",
+    "gold": "23.4",
+    "kind": "percent"
+  },
+  {
+    "id": "q04",
+    "question": "How many distinct values does column user_gender have?",
+    "column": "user_gender",
+    "gold": "5",
+    "kind": "integer"
+  },
+  {
+    "id": "q05",
+    "question": "What is the cardinality tier of column user_gender?",
+    "column": "user_gender",
+    "gold": "low",
+    "kind": "text"
+  },
+  {
+    "id": "q06",
+    "question": "What is the cardinality tier of column user_guid?",
+    "column": "user_guid",
+    "gold": "identifier",
+    "kind": "text"
+  },
+  {
+    "id": "q07",
+    "question": "How many distinct values does column user_address_id have?",
+    "column": "user_address_id",
+    "gold": "489",
+    "kind": "integer"
+  },
+  {
+    "id": "q08",
+    "question": "What is the mean of column user_appr_id in the profiled sample?",
+    "column": "user_appr_id",
+    "gold": "10.664",
+    "kind": "float"
+  },
+  {
+    "id": "q09",
+    "question": "What is the maximum value of column user_appr_id in the profiled sample?",
+    "column": "user_appr_id",
+    "gold": "505",
+    "kind": "float"
+  },
+  {
+    "id": "q10",
+    "question": "How many rows were used to profile column applicant_archived_flag?",
+    "column": "applicant_archived_flag",
+    "gold": "500",
+    "kind": "integer"
+  }
+]

@@ -1,0 +1,94 @@
+# Example nexcraft-jobs job spec for the ontology-pipeline Temporal workflow.
+#
+# Submit via:
+#   nexcraft-yaml-job run configs/csod_temporal_job.example.yaml
+#
+# (The package is called `nexcraft-jobs` but the installed CLI binary is
+# `nexcraft-yaml-job` — singular.)
+#
+# Prerequisites:
+#   - Postgres running on localhost:5432 with the CSOD schema + data loaded.
+#     Loading is OUT OF SCOPE for this workflow — run schema.sql + `COPY` the
+#     CSVs from `data/indexingsamples/` first.
+#   - Temporal running on localhost:7233.
+#   - ontology-pipeline worker running:
+#       python -m ontology_pipeline.temporal.worker --task-queue ontology-pipeline-default
+#   - ontology-store schema migrated to head:
+#       ONTOLOGY_STORE_URL=postgresql+psycopg://... alembic upgrade head
+#   - Environment variables set (referenced via ${...} below):
+#       OPENAI_API_KEY, CSOD_PG_USER, CSOD_PG_PASSWORD, ONTOLOGY_STORE_URL
+
+version: 1
+name: csod-ontology-ingestion
+workflow_type: ontology_ingestion
+task_queue: ontology-pipeline-default
+temporal_target: localhost:7233
+workflow_id_prefix: csod-ontology
+wait_for_result: true
+
+input:
+  source:
+    source_id: csod-pg
+    org_id: csod
+    kind: postgres
+    connection:
+      host: localhost
+      port: 5432
+      database: csod_test
+      user: ${CSOD_PG_USER}
+      password: ${CSOD_PG_PASSWORD}
+      sslmode: prefer
+    schemas: [public]
+
+  tables:
+    # Optional include/exclude patterns. Empty == process all tables in `schemas`.
+    include_patterns: []
+    exclude_patterns: []
+
+  semantic_layer:
+    # Cards directory + key_areas vocabulary — optional. When absent, the
+    # NER pre-pass has no tenant lexicon to match against and concepts/
+    # key_areas annotations are LLM-only.
+    cards_dir: ./semantic_layer
+    key_areas_vocab_path: ./semantic_layer/key_areas_vocab.yaml
+
+  output:
+    # 'hierarchy_store' writes into ontology-store Postgres. 'tee' also writes
+    # to base_dir on disk for inspection.
+    kind: tee
+    base_dir: ./out/csod
+
+  llm:
+    provider: openai
+    model: deepseek-chat
+    api_key_env: DEEPSEEK_API_KEY
+    base_url_env: DEEPSEEK_BASE_URL
+    base_url_default: https://api.deepseek.com
+
+  pipeline:
+    # ── Always-on basics ──
+    fill_descriptions: true
+    annotate: true
+    concepts_source: ner_then_llm   # foundry NER + LLM grounding
+    compute_column_stats: true       # foundry bundle_from_pandas → column_stat
+    column_stats_sample_limit: 1000
+
+    # ── Enrichment stages (all gated; turn on per source) ──
+    rich_description: true
+    enrich_column_semantics: true
+    enrich_data_protection: true
+    infer_relationships: true
+    enrich_causal_dependencies: true
+
+    # ── Post-passes ──
+    enrich_cross_asset_causal: true
+    induce_relation_schema: true     # foundry.induce_schema → relation_type TBox
+    relation_induction_min_support: 2
+    propose_new_causal_nodes: false  # human-review path
+
+    # ── Re-runs ──
+    re_enrich_unchanged: false       # respect content-hash short-circuit
+
+  # Workflow-only: per-table concurrency cap (Temporal fan-out).
+  # Bigger → faster but more concurrent LLM / DB pressure. Default 4.
+  per_table_concurrency: 4

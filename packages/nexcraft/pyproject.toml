@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nexcraft"
+version = "0.1.0"
+description = "Federated SQL execution for Python with Arrow streaming."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "pyarrow>=17.0",
+    "structlog>=24.0",
+]
+
+[project.optional-dependencies]
+postgres = ["adbc-driver-postgresql>=1.0", "asyncpg>=0.29"]
+snowflake = ["adbc-driver-snowflake>=1.0"]
+bigquery = ["adbc-driver-bigquery>=1.0"]
+iceberg = []
+delta = []
+server = ["fastapi>=0.110", "uvicorn[standard]>=0.30", "protobuf>=5.0"]
+otel = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp>=1.27",
+]
+prometheus = ["prometheus-client>=0.20"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.8", "requests>=2.28"]
+
+[project.scripts]
+nexcraft = "nexcraft.cli.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nexcraft"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: live combined API + Postgres (set RUN_CSOD_WORKDAY_INTEGRATION=1)",
+]

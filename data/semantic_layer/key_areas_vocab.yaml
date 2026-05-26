@@ -1,0 +1,11 @@
+# $NEXCRAFT_OUT/semantic_layer/key_areas_vocab.yaml
+key_areas:
+  - id: training_compliance
+    description: Mandatory training assignment, completion, and recertification.
+  - id: workforce_composition
+    description: Org-unit hierarchy, employment status, manager relationships.
+  - id: curriculum_design
+    description: Training catalog structure, prerequisites, due-date policy.
+  - id: certification_lifecycle
+    description: Re-certification cycles, expirations, validity windows.
+  - hipaa            # bare-string form also supported — id = "hipaa", no description

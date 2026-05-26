@@ -1,0 +1,9 @@
+run_id,question_id,model,runtime,format,correct,gold
+demo,q01,openai,native,markdown,True,500
+demo,q01,openai,native,json,False,500
+demo,q01,deepseek,skill,markdown,True,500
+demo,q01,deepseek,skill,json,True,500
+demo,q02,openai,langchain,markdown,True,0
+demo,q02,openai,langchain,json,False,0
+demo,q02,claude,native,markdown,True,0
+demo,q02,claude,native,json,True,0

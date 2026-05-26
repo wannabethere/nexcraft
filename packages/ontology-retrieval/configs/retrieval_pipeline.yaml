@@ -1,0 +1,41 @@
+# Retrieval pipeline configuration.
+#
+# Two concerns:
+#   1. `sources` declares the named sources available to kinds.
+#      Each kind's `sources_required` resolves into this map by name.
+#   2. `kinds` lets you override per-kind cache TTL or disable specific kinds.
+#      Kinds are otherwise registered by the package automatically.
+
+sources:
+  # Postgres-backed sources, used by the asset / lineage kinds.
+  - name: postgres_assets
+    kind: postgres_asset
+  - name: postgres_lineage
+    kind: postgres_lineage
+
+  # Qdrant sources — uncomment and wire a client when ready.
+  # - name: qdrant_hier_t4_assets
+  #   kind: qdrant
+  #   options:
+  #     collection: hier_t4_assets_prod
+  # - name: qdrant_sql_pairs
+  #   kind: qdrant
+  #   options:
+  #     collection: sql_pairs_acme_corp
+  # - name: qdrant_cards
+  #   kind: qdrant
+  #   options:
+  #     collection: cards_acme_corp
+
+kinds:
+  # Override per-kind TTL or disable selectively. Examples:
+  # - id: asset_search
+  #   cache_ttl_seconds: 1200
+  # - id: lineage_trace
+  #   cache_ttl_seconds: 60
+  # - id: cards_search
+  #   enabled: false              # disables caching; the kind still works
+
+default_cache_ttl_seconds: 600
+cache_max_entries: 1024
+cache_enabled: true

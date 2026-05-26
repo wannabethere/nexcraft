@@ -1,0 +1,65 @@
+# Example pipeline config.
+# Run:  ontology-pipeline run --config configs/example.yaml
+#
+# Required env vars (referenced via ${VAR}):
+#   PG_USER, PG_PASSWORD, OPENAI_API_KEY
+
+source:
+  source_id: csod-servicenow-local
+  org_id: acme-corp
+  kind: postgres
+  connection:
+    host: localhost
+    port: 5432
+    database: serviceslearn3_prod_db_02345
+    user: ${PG_USER}
+    password: ${PG_PASSWORD}
+    sslmode: prefer
+  schemas:
+    - public
+
+# Table filter. Empty arrays mean "process all tables in the configured schemas".
+# Configure include/exclude (exact names) or include_patterns/exclude_patterns (glob)
+# to narrow scope.
+tables:
+  include: []                       # e.g. ["csod_employee", "training_assignment"]
+  exclude: []                       # e.g. ["audit_log_archive"]
+  include_patterns: []              # e.g. ["csod_*", "training_*"]
+  exclude_patterns: ["*_archive", "tmp_*"]
+
+# Existing semantic-layer card directory + key_areas vocab.
+# Annotation enrichment uses these as the candidate list the LLM picks from.
+# If either path is absent, annotation is skipped silently (deterministic-only run).
+semantic_layer:
+  cards_dir: ../../nexcraftontologyoss/tenants/acme-corp/semantic_layer
+  key_areas_vocab_path: ../../nexcraftontologyoss/tenants/acme-corp/key_areas_vocab.yaml
+
+output:
+  kind: filesystem
+  base_dir: ./out/acme-corp
+
+llm:
+  provider: openai
+  model: deepseek-chat
+  api_key_env: DEEPSEEK_API_KEY
+  base_url_env: DEEPSEEK_BASE_URL
+  base_url_default: https://api.deepseek.com
+
+pipeline:
+  # Basic — fills missing description strings. Implied off when rich_description=true.
+  fill_descriptions: true
+
+  # Rich enrichment stages (each opt-in)
+  rich_description: false           # business_purpose, use_cases, update_frequency, etc.
+  enrich_column_semantics: false    # semantic_unit, business_meaning, is_business_key
+  enrich_data_protection: false     # is_pii, pii_categories, sensitivity_class + RLS/CLS hints
+  infer_relationships: false        # propose FKs when none declared in DDL
+  enrich_causal_dependencies: false # propose causal_node participation + causal candidates
+  propose_new_causal_nodes: false   # allow LLM to draft NEW causal_node cards (review-only)
+
+  # Concept / key_area / causal_relations annotation against the card vocab
+  annotate: true
+
+  # Idempotency
+  re_enrich_unchanged: false        # Skip tables whose content hash matches prior run
+  parallelism: 4                    # reserved; v1 is sequential

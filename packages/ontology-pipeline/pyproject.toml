@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ontology-pipeline"
+version = "0.1.0"
+description = "Auto-build pipeline that introspects a data source, generates MDL, and enriches with bottoms-up concept/key_area/causal_relations annotations. Depends on ontology-foundry."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "ontology-foundry>=0.1.0",
+    "ontology-store>=0.1.0",
+    "pydantic>=2.8",
+    "pyyaml>=6.0",
+    "structlog>=24.0",
+    "click>=8.1",
+    "psycopg[binary]>=3.2",
+]
+
+[project.optional-dependencies]
+llm = [
+    "openai>=1.50",
+]
+temporal = [
+    # Matches nexcraft-jobs (>=1.6) so YAML jobs submit cleanly into the same
+    # Temporal server.
+    "temporalio>=1.6",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+ontology-pipeline = "ontology_pipeline.cli:main"
+ontology-pipeline-temporal-worker = "ontology_pipeline.temporal.worker:main"
+
+[tool.uv.sources]
+ontology-foundry = { path = "../ontology-foundry", editable = true }
+ontology-store = { path = "../ontology-store", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["ontology_pipeline"]

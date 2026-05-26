@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nexcraft-jobs"
+version = "0.1.0"
+description = "Analytical jobs for nexcraft — recipes on Temporal + DuckDB."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "nexcraft>=0.1.0,<0.2",
+    "dstools>=0.1.0",
+    "duckdb>=1.0",
+    "temporalio>=1.6",
+    "pyarrow>=17.0",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+forecast = ["statsmodels>=0.14"]
+snowflake = ["snowflake-connector-python[pandas]>=3.5"]
+postgres  = ["psycopg2-binary>=2.9", "asyncpg>=0.29"]
+cornerstone = ["pyodbc>=5.1"]
+# Delta + Iceberg via DuckDB's `delta`, `iceberg`, `httpfs`, and `aws` extensions.
+# DuckDB downloads the C++ extensions at runtime on first INSTALL — no extra
+# Python packages are strictly required. pyiceberg is listed for catalog-based
+# Iceberg resolution (Glue / REST); direct-path `iceberg_scan()` doesn't need it.
+lakehouse = ["pyiceberg>=0.7"]
+genieml = ["genieml-skills>=0.1.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.8"]
+
+[project.scripts]
+nexcraft-yaml-job = "nexcraft_jobs.yaml_jobs.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nexcraft_jobs"]
+
+[tool.uv.sources]
+nexcraft = { workspace = true }
+dstools = { path = "../../../genieml/dstools", editable = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

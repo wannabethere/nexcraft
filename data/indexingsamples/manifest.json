@@ -1,0 +1,55 @@
+{
+  "source_dump": "/Users/sameerm/Downloads/servicenow_backup.sql",
+  "source_system": "csod_learning",
+  "tables": {
+    "users_core": {
+      "role": "employee",
+      "pk": "user_id"
+    },
+    "ou_core": {
+      "role": "org_unit",
+      "pk": "ou_id"
+    },
+    "user_ou_core": {
+      "role": "employee_org_link",
+      "fk": [
+        "user_id",
+        "ou_id"
+      ]
+    },
+    "training_core": {
+      "role": "course",
+      "pk": "object_id"
+    },
+    "training_local_core": {
+      "role": "course_localized",
+      "fk": [
+        "object_id"
+      ]
+    },
+    "training_assignment_core": {
+      "role": "assignment_definition",
+      "pk": "assignment_id"
+    },
+    "training_assignment_user_core": {
+      "role": "assignment_user",
+      "fk": [
+        "user_id"
+      ]
+    },
+    "transcript_core": {
+      "role": "training_transcript",
+      "fk": [
+        "transc_user_id",
+        "transc_object_id"
+      ]
+    },
+    "curriculum_structure_core": {
+      "role": "curriculum_structure"
+    },
+    "causal_training_events": {
+      "role": "analytic_flat_sample",
+      "rows": 3000
+    }
+  }
+}

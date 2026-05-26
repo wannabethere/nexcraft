@@ -1,0 +1,14 @@
+Most Spark "performance issues" aren't really about Spark. They're about misreading the UI, caching things you shouldn't, broadcasting things that shouldn't be broadcast, and ignoring the AQE/DPP defaults that changed in 4.x.
+
+I sat down and wrote every Spark mistake I've watched break production. Mine, my team's, and the ones people screamed about.
+
+It turned into a checklist:
+- Partitioning that doesn't fight you (coalesce vs repartition vs bucketing)
+- When caching is slower than recomputing
+- Memory layout, overhead, and why your "8G executor" actually wants 12G
+- Joins that explode (broadcast, skew, bucket)
+- JDBC reads that are silently single-threaded
+- The Spark 4.x defaults you probably haven't turned on yet
+- What to actually look at in the UI before you start guessing
+
+Every item came from a real production screwup.

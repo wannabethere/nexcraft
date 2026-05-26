@@ -1,0 +1,575 @@
+{
+  "function_reference": {
+    "find_correlated_metrics": {
+      "description": "Scans all metrics and ranks by Pearson correlation strength against the primary metric within a lookback window ending at the anomaly date. Answers: 'Which other metrics moved with the anomaly?'",
+      "parameters": [
+        "p_primary_metric: Primary metric name (TEXT)",
+        "p_anomaly_date: Anomaly date (DATE)",
+        "p_lookback_days: Lookback window days (INTEGER, default 14)",
+        "p_min_correlation: Filter weak correlations (DECIMAL, default 0.60)",
+        "p_region: Region filter (TEXT, optional)",
+        "p_product_tier: Product tier filter (TEXT, optional)"
+      ],
+      "returns": "TABLE with metric_pair, primary_metric, correlated_metric, correlation, abs_correlation, direction, data_points, window_start, window_end",
+      "usage": "find_correlated_metrics('revenue', '2024-01-15'::DATE, 14, 0.60)",
+      "example": "SELECT * FROM find_correlated_metrics('revenue', '2024-01-15'::DATE, 14, 0.60);"
+    },
+    "calculate_lag_correlation": {
+      "description": "Sweeps lag -N to +N for a metric pair and computes Pearson correlation at each lag. Negative lag = other_metric LEADS primary (causal candidate). Positive lag = other_metric LAGS primary.",
+      "parameters": [
+        "p_primary_metric: Primary metric (TEXT)",
+        "p_other_metric: Other metric (TEXT)",
+        "p_anomaly_date: Anomaly date (DATE)",
+        "p_lookback_days: Lookback days (INTEGER, default 14)",
+        "p_max_lag: Sweep range (INTEGER, default 5)",
+        "p_region: Region filter (TEXT, optional)",
+        "p_product_tier: Product tier filter (TEXT, optional)"
+      ],
+      "returns": "TABLE with lag_periods, lag_direction, correlation, abs_correlation, interpretation",
+      "usage": "calculate_lag_correlation('revenue', 'p99_latency_ms', '2024-01-15'::DATE, 14, 5)",
+      "example": "SELECT * FROM calculate_lag_correlation('revenue', 'p99_latency_ms', '2024-01-15'::DATE, 14, 5) ORDER BY abs_correlation DESC;"
+    },
+    "decompose_impact_by_dimension": {
+      "description": "Breaks total anomaly impact into segment-level contributions. Compares anomaly period values against baseline average. contribution_to_total shows each segment as % of total delta.",
+      "parameters": [
+        "p_metric_name: Metric name (TEXT)",
+        "p_anomaly_date: Anomaly date (DATE)",
+        "p_dimension: Dimension type - 'region', 'product_tier', 'region_tier' (TEXT)",
+        "p_baseline_days: Days before anomaly for baseline (INTEGER, default 7)",
+        "p_comparison_days: Anomaly window width (INTEGER, default 1)"
+      ],
+      "returns": "TABLE with dimension_value, baseline_avg, anomaly_actual, absolute_delta, pct_delta, segment_weight, contribution_to_total, impact_rank",
+      "usage": "decompose_impact_by_dimension('revenue', '2024-01-15'::DATE, 'region_tier', 7)",
+      "example": "SELECT * FROM decompose_impact_by_dimension('revenue', '2024-01-15'::DATE, 'region_tier', 7);"
+    },
+    "build_anomaly_explanation_payload": {
+      "description": "Assembles complete structured JSONB payload for a detected anomaly including stats, correlated metrics, leading indicators (lag analysis), and dimensional decomposition for LLM explanation layer.",
+      "parameters": [
+        "p_primary_metric: Primary metric (TEXT)",
+        "p_anomaly_date: Anomaly date (DATE)",
+        "p_lookback_days: Lookback days (INTEGER, default 14)",
+        "p_region: Region filter (TEXT, optional)",
+        "p_product_tier: Product tier filter (TEXT, optional)"
+      ],
+      "returns": "JSONB payload with anomaly stats, correlations, leading_indicators, impact_by_segment",
+      "usage": "build_anomaly_explanation_payload('revenue', '2024-01-15'::DATE, 14)",
+      "example": "SELECT build_anomaly_explanation_payload('revenue', '2024-01-15'::DATE, 14);"
+    },
+    "calculate_sma": {
+      "description": "Calculate Simple Moving Average with Bollinger-style bands. Returns SMA, deviation, and upper/lower bands (\u00b12 std dev).",
+      "parameters": [
+        "p_data: JSONB array of {time, value, group?}",
+        "p_window_size: Window size (INTEGER, default 7)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, sma_value, deviation, percent_deviation, upper_band, lower_band",
+      "usage": "calculate_sma(data_jsonb, 7, NULL)",
+      "example": "SELECT * FROM calculate_sma('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":105},{\"time\":\"2024-01-03\",\"value\":102}]'::JSONB, 3, NULL);"
+    },
+    "calculate_wma": {
+      "description": "Calculate Weighted Moving Average giving more weight to recent values. More responsive than SMA.",
+      "parameters": [
+        "p_data: JSONB array of {time, value}",
+        "p_window_size: Window size (INTEGER, default 7)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, wma_value, deviation, percent_deviation",
+      "usage": "calculate_wma(data_jsonb, 7)",
+      "example": "SELECT * FROM calculate_wma('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":105},{\"time\":\"2024-01-03\",\"value\":102}]'::JSONB, 5);"
+    },
+    "calculate_moving_variance": {
+      "description": "Calculate moving variance, std dev, coefficient of variation, and Z-scores for volatility analysis.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_window_size: Window size (INTEGER, default 7)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, moving_mean, moving_variance, moving_std, coefficient_variation, z_score",
+      "usage": "calculate_moving_variance(data_jsonb, 5, NULL)",
+      "example": "SELECT * FROM calculate_moving_variance('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":150},{\"time\":\"2024-01-03\",\"value\":80}]'::JSONB, 5, NULL);"
+    },
+    "calculate_moving_quantiles": {
+      "description": "Calculate moving quartiles (Q1, median, Q3) and IQR. Robust to outliers.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_window_size: Window size (INTEGER, default 7)",
+        "p_quantiles: Quantile array (DECIMAL[], default [0.25,0.5,0.75])",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, q25, q50_median, q75, iqr",
+      "usage": "calculate_moving_quantiles(data_jsonb, 7, ARRAY[0.25,0.5,0.75])",
+      "example": "SELECT * FROM calculate_moving_quantiles('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":150}]'::JSONB, 5);"
+    },
+    "calculate_moving_minmax": {
+      "description": "Calculate moving min/max with range and position metrics. position_in_range: 0=at min, 1=at max.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_window_size: Window size (INTEGER, default 7)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, moving_min, moving_max, moving_range, position_in_range",
+      "usage": "calculate_moving_minmax(data_jsonb, 7)",
+      "example": "SELECT * FROM calculate_moving_minmax('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":150}]'::JSONB, 5);"
+    },
+    "calculate_moving_correlation": {
+      "description": "Calculate moving correlation between two time series. Identifies changing relationships over time.",
+      "parameters": [
+        "p_data_x: JSONB array for series X",
+        "p_data_y: JSONB array for series Y",
+        "p_window_size: Window size (INTEGER, default 7)"
+      ],
+      "returns": "TABLE with row_number, time_period, value_x, value_y, correlation, correlation_strength",
+      "usage": "calculate_moving_correlation(data_x, data_y, 7)",
+      "example": "SELECT * FROM calculate_moving_correlation('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":105}]'::JSONB, '[{\"time\":\"2024-01-01\",\"value\":200},{\"time\":\"2024-01-02\",\"value\":210}]'::JSONB, 7);"
+    },
+    "calculate_moving_sum": {
+      "description": "Calculate moving sum with contribution percentage. Shows each value's contribution to recent total.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_window_size: Window size (INTEGER, default 7)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, moving_sum, contribution_pct",
+      "usage": "calculate_moving_sum(data_jsonb, 7)",
+      "example": "SELECT * FROM calculate_moving_sum('[{\"time\":\"2024-01-01\",\"value\":10},{\"time\":\"2024-01-02\",\"value\":20},{\"time\":\"2024-01-03\",\"value\":15}]'::JSONB, 3);"
+    },
+    "calculate_expanding_window": {
+      "description": "Calculate metrics using all prior data (expanding window). Operations: mean, sum, std, min, max, count.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_operation: mean|sum|std|min|max|count (default mean)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, expanding_value, window_size",
+      "usage": "calculate_expanding_window(data_jsonb, 'mean', NULL)",
+      "example": "SELECT * FROM calculate_expanding_window('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110},{\"time\":\"2024-01-03\",\"value\":105}]'::JSONB, 'mean', NULL);"
+    },
+    "calculate_cumulative_operations": {
+      "description": "Calculate multiple cumulative operations: sum, product, max, min. Returns percent_of_total for cumulative sum.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_operations: TEXT array (default ['sum','product','max','min'])",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, cumsum, cumproduct, cummax, cummin, percent_of_total",
+      "usage": "calculate_cumulative_operations(data_jsonb)",
+      "example": "SELECT * FROM calculate_cumulative_operations('[{\"time\":\"2024-01-01\",\"value\":10},{\"time\":\"2024-01-02\",\"value\":20}]'::JSONB);"
+    },
+    "calculate_time_weighted_ma": {
+      "description": "Calculate time-weighted moving average with exponential decay. More weight on recent observations.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_decay_factor: Decay factor (DECIMAL, default 0.1)",
+        "p_window_size: Window size (INTEGER, default 30)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, twma_value, deviation",
+      "usage": "calculate_time_weighted_ma(data_jsonb, 0.1, 30)",
+      "example": "SELECT * FROM calculate_time_weighted_ma('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110}]'::JSONB, 0.1, 30);"
+    },
+    "calculate_bollinger_bands": {
+      "description": "Calculate Bollinger Bands: SMA with \u00b1N standard deviation bands. Returns bandwidth and %B (position within bands).",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_window_size: Window size (INTEGER, default 20)",
+        "p_num_std: Number of std devs (DECIMAL, default 2.0)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, middle_band, upper_band, lower_band, bandwidth, percent_b",
+      "usage": "calculate_bollinger_bands(data_jsonb, 20, 2.0)",
+      "example": "SELECT * FROM calculate_bollinger_bands('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":105},{\"time\":\"2024-01-03\",\"value\":102}]'::JSONB, 20, 2.0);"
+    },
+    "calculate_moving_rank": {
+      "description": "Calculate moving rank and percentile rank within window. Identifies relative position of values.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_window_size: Window size (INTEGER, default 7)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, window_rank, window_percentile, is_highest, is_lowest",
+      "usage": "calculate_moving_rank(data_jsonb, 7)",
+      "example": "SELECT * FROM calculate_moving_rank('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":150}]'::JSONB, 5);"
+    },
+    "calculate_percent_change_comparison": {
+      "description": "Calculate percent change between treatment and baseline groups. Returns relative uplift and absolute change for A/B test analysis.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_condition_column: Condition column name",
+        "p_baseline_value: Baseline value",
+        "p_metric_columns: Metric columns (TEXT[], default ['value'])"
+      ],
+      "returns": "TABLE with condition_value, metric_name, baseline_avg, treatment_avg, absolute_change, percent_change, relative_uplift",
+      "usage": "calculate_percent_change_comparison(data, 'condition', 'control', ARRAY['conversion'])",
+      "example": "SELECT * FROM calculate_percent_change_comparison('[{\"condition\":\"control\",\"metric\":\"conversion\",\"value\":0.10},{\"condition\":\"treatment\",\"metric\":\"conversion\",\"value\":0.12}]'::JSONB, 'condition', 'control', ARRAY['conversion']);"
+    },
+    "calculate_absolute_change_comparison": {
+      "description": "Calculate absolute change with standard errors and z-scores for statistical significance testing.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_condition_column: Condition column",
+        "p_baseline_value: Baseline value"
+      ],
+      "returns": "TABLE with condition_value, metric_name, baseline_avg, treatment_avg, absolute_diff, std_error, z_score",
+      "usage": "calculate_absolute_change_comparison(data, 'condition', 'control')",
+      "example": "SELECT * FROM calculate_absolute_change_comparison('[{\"condition\":\"control\",\"metric\":\"conv\",\"value\":0.10},{\"condition\":\"treatment\",\"metric\":\"conv\",\"value\":0.12}]'::JSONB, 'condition', 'control');"
+    },
+    "calculate_prepost_comparison": {
+      "description": "Pre-post analysis for within-subject comparisons. Automatically determines cutoff time if not provided.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_entity_id_column: Entity column (default entity_id)",
+        "p_time_column: Time column (default time)",
+        "p_cutoff_time: Cutoff timestamp (optional)"
+      ],
+      "returns": "TABLE with entity_id, pre_value, post_value, absolute_change, percent_change, change_direction, change_magnitude",
+      "usage": "calculate_prepost_comparison(data, 'entity_id', 'time', cutoff_ts)",
+      "example": "SELECT * FROM calculate_prepost_comparison('[{\"entity_id\":\"user1\",\"time\":\"2024-01-01\",\"value\":100},{\"entity_id\":\"user1\",\"time\":\"2024-02-01\",\"value\":120}]'::JSONB, 'entity_id', 'time', '2024-01-15'::TIMESTAMP);"
+    },
+    "calculate_stratified_analysis": {
+      "description": "Stratified analysis (Mantel-Haenszel style) for confounding adjustment. Calculates stratum-specific effects with weights.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_treatment_column: Treatment column",
+        "p_treatment_value: Treatment value",
+        "p_control_value: Control value",
+        "p_strata_column: Strata column"
+      ],
+      "returns": "TABLE with stratum_value, treatment_mean, control_mean, stratum_effect, stratum_weight, stratum_n",
+      "usage": "calculate_stratified_analysis(data, 'treatment', 'A', 'B', 'strata')",
+      "example": "SELECT * FROM calculate_stratified_analysis('[{\"treatment\":\"A\",\"strata\":\"S1\",\"value\":10},{\"treatment\":\"B\",\"strata\":\"S1\",\"value\":8}]'::JSONB, 'treatment', 'A', 'B', 'strata');"
+    },
+    "calculate_bootstrap_ci": {
+      "description": "Bootstrap confidence intervals for robust inference. Supports mean, median, and standard deviation.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_metric: mean|median|std (default mean)",
+        "p_confidence_level: Confidence level (DECIMAL, default 95)",
+        "p_bootstrap_samples: Number of samples (INTEGER, default 1000)"
+      ],
+      "returns": "TABLE with metric_type, point_estimate, ci_lower, ci_upper, confidence_level, sample_size",
+      "usage": "calculate_bootstrap_ci(data_jsonb, 'mean', 95.0, 1000)",
+      "example": "SELECT * FROM calculate_bootstrap_ci('[{\"value\":100},{\"value\":105},{\"value\":110}]'::JSONB, 'mean', 95.0, 1000);"
+    },
+    "calculate_power_analysis": {
+      "description": "Sample size calculation for desired statistical power. Returns required sample size per group and Cohen d.",
+      "parameters": [
+        "p_effect_size: Effect size (DECIMAL)",
+        "p_baseline_std: Baseline standard deviation (DECIMAL)",
+        "p_alpha: Alpha level (DECIMAL, default 0.05)",
+        "p_power: Target power (DECIMAL, default 0.80)"
+      ],
+      "returns": "TABLE with effect_size, std_deviation, alpha_level, target_power, required_sample_per_group, total_sample_required, cohens_d",
+      "usage": "calculate_power_analysis(10.0, 25.0, 0.05, 0.80)",
+      "example": "SELECT * FROM calculate_power_analysis(10.0, 25.0, 0.05, 0.80);"
+    },
+    "calculate_effect_sizes": {
+      "description": "Calculate multiple effect size measures: Cohen d, Hedges g, Glass delta. Provides interpretation (negligible/small/medium/large).",
+      "parameters": [
+        "p_data_treatment: JSONB array for treatment group",
+        "p_data_control: JSONB array for control group"
+      ],
+      "returns": "TABLE with effect_size_type, effect_size_value, interpretation, treatment_mean, control_mean, pooled_std",
+      "usage": "calculate_effect_sizes(treatment_data, control_data)",
+      "example": "SELECT * FROM calculate_effect_sizes('[{\"value\":105},{\"value\":110},{\"value\":108}]'::JSONB, '[{\"value\":95},{\"value\":100},{\"value\":97}]'::JSONB);"
+    },
+    "adjust_pvalues_bonferroni": {
+      "description": "Bonferroni correction for multiple comparison adjustment. Prevents false positives in multiple hypothesis testing.",
+      "parameters": [
+        "p_pvalues: Array of p-values (DECIMAL[])",
+        "p_alpha: Alpha level (DECIMAL, default 0.05)"
+      ],
+      "returns": "TABLE with comparison_number, original_pvalue, adjusted_pvalue, is_significant_original, is_significant_adjusted, bonferroni_correction",
+      "usage": "adjust_pvalues_bonferroni(ARRAY[0.01, 0.03, 0.05], 0.05)",
+      "example": "SELECT * FROM adjust_pvalues_bonferroni(ARRAY[0.01, 0.03, 0.05, 0.08], 0.05);"
+    },
+    "calculate_sequential_analysis": {
+      "description": "Sequential analysis for A/B test monitoring with early stopping. Implements O'Brien-Fleming boundary (simplified).",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_treatment_column: Treatment column",
+        "p_treatment_value: Treatment value",
+        "p_control_value: Control value",
+        "p_alpha: Alpha (DECIMAL, default 0.05)"
+      ],
+      "returns": "TABLE with sample_size, treatment_mean, control_mean, effect_size, z_score, p_value, is_significant, stopping_boundary, recommendation",
+      "usage": "calculate_sequential_analysis(data, 'treatment', 'A', 'B', 0.05)",
+      "example": "SELECT * FROM calculate_sequential_analysis('[{\"treatment\":\"A\",\"value\":0.12},{\"treatment\":\"B\",\"value\":0.10}]'::JSONB, 'treatment', 'A', 'B');"
+    },
+    "calculate_cuped_adjustment": {
+      "description": "CUPED (Controlled-experiment Using Pre-Experiment Data) adjustment. Reduces variance using pre-experiment covariates.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_treatment_column: Treatment column",
+        "p_pre_metric_column: Pre-metric column (default pre_value)",
+        "p_post_metric_column: Post-metric column (default post_value)"
+      ],
+      "returns": "TABLE with treatment_group, unadjusted_mean, adjusted_mean, variance_reduction, cuped_theta",
+      "usage": "calculate_cuped_adjustment(data, 'treatment', 'pre_value', 'post_value')",
+      "example": "SELECT * FROM calculate_cuped_adjustment('[{\"treatment\":\"A\",\"pre_value\":100,\"post_value\":120},{\"treatment\":\"B\",\"pre_value\":95,\"post_value\":110}]'::JSONB, 'treatment');"
+    },
+    "calculate_lag": {
+      "description": "Calculate lagged values (shift backward in time) with change metrics. Supports grouping for panel data.",
+      "parameters": [
+        "p_data: JSONB array of {time, value}",
+        "p_lag_periods: Lag periods (INTEGER, default 1)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, lagged_value, absolute_change, percent_change, lag_periods",
+      "usage": "calculate_lag(data_jsonb, 1, NULL)",
+      "example": "SELECT * FROM calculate_lag('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110},{\"time\":\"2024-01-03\",\"value\":105},{\"time\":\"2024-01-04\",\"value\":115}]'::JSONB, 1, NULL);"
+    },
+    "calculate_lead": {
+      "description": "Calculate lead values (shift forward in time) for predictive analysis. Useful for forward-looking features.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_lead_periods: Lead periods (INTEGER, default 1)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, lead_value, absolute_change, percent_change, lead_periods",
+      "usage": "calculate_lead(data_jsonb, 1)",
+      "example": "SELECT * FROM calculate_lead('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110}]'::JSONB, 1);"
+    },
+    "analyze_variance": {
+      "description": "Analyze variance using rolling, expanding, or exponential windows. Returns variance, std dev, CV, and Z-scores.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_window_type: rolling|expanding|exponential (default rolling)",
+        "p_window_size: Window size (INTEGER, default 5)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, variance, std_dev, coefficient_variation, window_mean, z_score",
+      "usage": "analyze_variance(data_jsonb, 'rolling', 3, NULL)",
+      "example": "SELECT * FROM analyze_variance('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":150},{\"time\":\"2024-01-03\",\"value\":80},{\"time\":\"2024-01-04\",\"value\":120}]'::JSONB, 'rolling', 3, NULL);"
+    },
+    "analyze_distribution": {
+      "description": "Comprehensive distribution analysis with quartiles, skewness, and kurtosis. Supports grouped analysis.",
+      "parameters": [
+        "p_data: JSONB array of {value, group?}",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with group_name, count_values, mean_value, median_value, mode_value, std_dev, variance, min_value, max_value, range_value, q1, q3, iqr, skewness, kurtosis",
+      "usage": "analyze_distribution(data_jsonb, 'group')",
+      "example": "SELECT * FROM analyze_distribution('[{\"value\":100,\"group\":\"A\"},{\"value\":110,\"group\":\"A\"},{\"value\":95,\"group\":\"A\"},{\"value\":200,\"group\":\"B\"},{\"value\":210,\"group\":\"B\"}]'::JSONB, 'group');"
+    },
+    "calculate_difference": {
+      "description": "Calculate first and second-order differences for stationarity. Tests whether differenced series is stationary.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_order: 1 for first difference, 2 for second (INTEGER, default 1)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, first_difference, second_difference, is_stationary",
+      "usage": "calculate_difference(data_jsonb, 1, NULL)",
+      "example": "SELECT * FROM calculate_difference('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110},{\"time\":\"2024-01-03\",\"value\":115},{\"time\":\"2024-01-04\",\"value\":125}]'::JSONB, 1, NULL);"
+    },
+    "calculate_cdf": {
+      "description": "Calculate empirical cumulative distribution function. Returns percentile ranks and cumulative probabilities.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, cdf_value, percentile_rank, cumulative_count, group_name",
+      "usage": "calculate_cdf(data_jsonb)",
+      "example": "SELECT * FROM calculate_cdf('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110}]'::JSONB);"
+    },
+    "calculate_rolling_window": {
+      "description": "General-purpose rolling window with multiple aggregations. Supports mean, sum, min, max, std, count.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_window_size: Window size (INTEGER, default 5)",
+        "p_aggregation: mean|sum|min|max|std|count (default mean)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, rolling_value, deviation_from_rolling, percent_deviation, window_size",
+      "usage": "calculate_rolling_window(data_jsonb, 5, 'mean')",
+      "example": "SELECT * FROM calculate_rolling_window('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110}]'::JSONB, 5, 'mean');"
+    },
+    "calculate_ema": {
+      "description": "Exponential moving average with configurable smoothing factor. Alpha closer to 1 = more responsive, closer to 0 = smoother.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_alpha: Smoothing factor 0<alpha<=1 (DECIMAL, default 0.3)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, ema_value, deviation",
+      "usage": "calculate_ema(data_jsonb, 0.3)",
+      "example": "SELECT * FROM calculate_ema('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110},{\"time\":\"2024-01-03\",\"value\":105},{\"time\":\"2024-01-04\",\"value\":115}]'::JSONB, 0.3, NULL);"
+    },
+    "calculate_autocorrelation": {
+      "description": "Calculate autocorrelation function (ACF) up to specified lag. Tests significance using confidence bounds.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_max_lag: Maximum lag (INTEGER, default 10)"
+      ],
+      "returns": "TABLE with lag_period, autocorrelation, is_significant, confidence_lower, confidence_upper",
+      "usage": "calculate_autocorrelation(data_jsonb, 5)",
+      "example": "SELECT * FROM calculate_autocorrelation('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":105},{\"time\":\"2024-01-03\",\"value\":102},{\"time\":\"2024-01-04\",\"value\":108}]'::JSONB, 5);"
+    },
+    "test_stationarity": {
+      "description": "Simplified stationarity test checking mean, variance, and trend stability. Returns actionable recommendations.",
+      "parameters": [
+        "p_data: JSONB array"
+      ],
+      "returns": "TABLE with test_name, is_stationary, mean_value, variance, trend_slope, recommendation",
+      "usage": "test_stationarity(data_jsonb)",
+      "example": "SELECT * FROM test_stationarity('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110},{\"time\":\"2024-01-03\",\"value\":120},{\"time\":\"2024-01-04\",\"value\":130}]'::JSONB);"
+    },
+    "calculate_cumulative": {
+      "description": "Calculate cumulative operations: sum, product, max, min. Returns percent of total for cumulative sum. Input uses 'value' field.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_operation: sum|product|max|min (default sum)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, cumulative_value, percent_of_total",
+      "usage": "calculate_cumulative(data_jsonb, 'sum', NULL)",
+      "example": "SELECT * FROM calculate_cumulative('[{\"time\":\"2024-01-01\",\"value\":10},{\"time\":\"2024-01-02\",\"value\":20},{\"time\":\"2024-01-03\",\"value\":15},{\"time\":\"2024-01-04\",\"value\":25}]'::JSONB, 'sum', NULL);"
+    },
+    "calculate_percent_change": {
+      "description": "Calculate period-over-period percent changes. Supports simple, log, and compound methods. Auto-categorizes magnitude.",
+      "parameters": [
+        "p_data: JSONB array",
+        "p_periods: Periods back (INTEGER, default 1)",
+        "p_method: simple|log|compound (default simple)",
+        "p_group_by: Group column (TEXT, optional)"
+      ],
+      "returns": "TABLE with row_number, time_period, original_value, previous_value, absolute_change, percent_change, log_change, change_category",
+      "usage": "calculate_percent_change(data_jsonb, 1, 'simple')",
+      "example": "SELECT * FROM calculate_percent_change('[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110}]'::JSONB, 1, 'simple');"
+    },
+    "aggregate_by_time": {
+      "description": "Aggregate time series data into time periods (hour, day, week, month, quarter, year). Supports sum, avg, min, max, count, stddev.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_time_column: Time column (default time)",
+        "p_metric_column: Metric column (default metric)",
+        "p_period: hour|day|week|month|quarter|year (default day)",
+        "p_aggregation: sum|avg|min|max|count|stddev (default sum)"
+      ],
+      "returns": "TABLE with time_period, aggregated_value, record_count, min_value, max_value, avg_value, stddev_value",
+      "usage": "aggregate_by_time(data, 'time', 'metric', 'day', 'sum')",
+      "example": "SELECT * FROM aggregate_by_time('[{\"time\":\"2024-01-01 00:00:00\",\"metric\":100},{\"time\":\"2024-01-01 06:00:00\",\"metric\":150},{\"time\":\"2024-01-02 00:00:00\",\"metric\":120}]'::JSONB, 'time', 'metric', 'day', 'sum');"
+    },
+    "calculate_moving_average": {
+      "description": "Calculate moving averages: Simple (SMA), Weighted (WMA), or Exponential (EMA). Input uses 'metric' field. Detects deviations from trend.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_window_size: Window size (INTEGER, default 7)",
+        "p_ma_type: simple|weighted|exponential (default simple)"
+      ],
+      "returns": "TABLE with time_period, actual_value, ma_value, deviation, percent_deviation",
+      "usage": "calculate_moving_average(data_jsonb, 7, 'simple')",
+      "example": "SELECT * FROM calculate_moving_average('[{\"time\":\"2024-01-01\",\"metric\":100},{\"time\":\"2024-01-02\",\"metric\":110},{\"time\":\"2024-01-03\",\"metric\":105},{\"time\":\"2024-01-04\",\"metric\":115},{\"time\":\"2024-01-05\",\"metric\":120}]'::JSONB, 3, 'simple');"
+    },
+    "calculate_growth_rates": {
+      "description": "Calculate period-over-period growth rates with annualization. Supports period_over_period, year_over_year, compound.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_period_type: period_over_period|year_over_year|compound (default period_over_period)",
+        "p_periods: Periods (INTEGER, default 1)"
+      ],
+      "returns": "TABLE with time_period, current_value, previous_value, absolute_change, percent_change, annualized_growth, growth_category",
+      "usage": "calculate_growth_rates(data_jsonb, 'period_over_period', 1)",
+      "example": "SELECT * FROM calculate_growth_rates('[{\"time\":\"2024-01-01\",\"metric\":1000},{\"time\":\"2024-02-01\",\"metric\":1100},{\"time\":\"2024-03-01\",\"metric\":1050},{\"time\":\"2024-04-01\",\"metric\":1200}]'::JSONB, 'period_over_period', 1);"
+    },
+    "calculate_statistical_trend": {
+      "description": "Perform linear regression to identify statistical trends. Returns slope, R-squared, correlation, and significance testing.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_confidence_level: Confidence level (DECIMAL, default 95)"
+      ],
+      "returns": "TABLE with trend_direction, slope, intercept, r_squared, correlation, p_value, is_significant, data_points, trend_strength",
+      "usage": "calculate_statistical_trend(data_jsonb, 95.0)",
+      "example": "SELECT * FROM calculate_statistical_trend('[{\"time\":\"2024-01-01\",\"metric\":100},{\"time\":\"2024-01-02\",\"metric\":105},{\"time\":\"2024-01-03\",\"metric\":108},{\"time\":\"2024-01-04\",\"metric\":112},{\"time\":\"2024-01-05\",\"metric\":115}]'::JSONB, 95.0);"
+    },
+    "forecast_linear": {
+      "description": "Generate linear forecasts with confidence intervals. Uses trend analysis to project future values.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_periods_ahead: Forecast periods (INTEGER, default 7)",
+        "p_confidence_interval: Confidence level (DECIMAL, default 95)"
+      ],
+      "returns": "TABLE with forecast_period, forecast_date, forecast_value, lower_bound, upper_bound, trend_component",
+      "usage": "forecast_linear(data_jsonb, 7, 95.0)",
+      "example": "SELECT * FROM forecast_linear('[{\"time\":\"2024-01-01\",\"metric\":100},{\"time\":\"2024-01-02\",\"metric\":110},{\"time\":\"2024-01-03\",\"metric\":120},{\"time\":\"2024-01-04\",\"metric\":130}]'::JSONB, 7, 95.0);"
+    },
+    "calculate_volatility": {
+      "description": "Calculate rolling volatility metrics including std dev and coefficient of variation. Classifies: very_low, low, moderate, high, very_high.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_window_size: Window size (INTEGER, default 30)"
+      ],
+      "returns": "TABLE with time_period, metric_value, rolling_std, rolling_variance, coefficient_variation, volatility_score, volatility_level",
+      "usage": "calculate_volatility(data_jsonb, 30)",
+      "example": "SELECT * FROM calculate_volatility('[{\"time\":\"2024-01-01\",\"metric\":100},{\"time\":\"2024-01-02\",\"metric\":150},{\"time\":\"2024-01-03\",\"metric\":80},{\"time\":\"2024-01-04\",\"metric\":120},{\"time\":\"2024-01-05\",\"metric\":90}]'::JSONB, 3);"
+    },
+    "compare_periods": {
+      "description": "Compare current period values with previous periods. Useful for MoM, QoQ, YoY analysis.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_comparison_type: previous|year_ago|quarter_ago (default previous)",
+        "p_n_periods: Periods back (INTEGER, default 1)"
+      ],
+      "returns": "TABLE with time_period, current_value, comparison_value, absolute_difference, relative_difference, comparison_period, change_direction",
+      "usage": "compare_periods(data_jsonb, 'previous', 1)",
+      "example": "SELECT * FROM compare_periods('[{\"time\":\"2024-01-01\",\"metric\":1000},{\"time\":\"2024-02-01\",\"metric\":1100},{\"time\":\"2024-03-01\",\"metric\":1050},{\"time\":\"2024-04-01\",\"metric\":1200}]'::JSONB, 'previous', 1);"
+    },
+    "detect_seasonality": {
+      "description": "Detect seasonal patterns by grouping data into seasonal periods. Returns seasonal indices showing deviation from average.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_season_length: Season length e.g. 12 for monthly yearly (INTEGER, default 12)"
+      ],
+      "returns": "TABLE with season_period, average_value, std_dev, min_value, max_value, coefficient_variation, seasonal_index",
+      "usage": "detect_seasonality(data_jsonb, 12)",
+      "example": "SELECT * FROM detect_seasonality('[{\"time\":\"2024-01-01\",\"metric\":100},{\"time\":\"2024-02-01\",\"metric\":110}]'::JSONB, 12);"
+    },
+    "detect_anomalies": {
+      "description": "Detect statistical anomalies using Z-score or IQR methods. Flags high and low outliers with anomaly scores.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_threshold_std: Std devs from mean (DECIMAL, default 2.0)",
+        "p_method: zscore|iqr|mad (default zscore)"
+      ],
+      "returns": "TABLE with time_period, metric_value, is_anomaly, anomaly_score, deviation_from_mean, z_score, anomaly_type",
+      "usage": "detect_anomalies(data_jsonb, 2.0, 'zscore')",
+      "example": "SELECT * FROM detect_anomalies('[{\"time\":\"2024-01-01\",\"metric\":100},{\"time\":\"2024-01-02\",\"metric\":105},{\"time\":\"2024-01-03\",\"metric\":300},{\"time\":\"2024-01-04\",\"metric\":110},{\"time\":\"2024-01-05\",\"metric\":108}]'::JSONB, 2.0, 'zscore');"
+    },
+    "get_top_metrics": {
+      "description": "Rank metrics by criteria: growth, volatility, absolute_value, trend_strength. Returns top N metrics.",
+      "parameters": [
+        "p_metrics_data: JSONB object with metric_name keys and arrays of {time, value}",
+        "p_n: Top N (INTEGER, default 5)",
+        "p_ranking_criteria: growth|volatility|absolute_value|trend_strength (default growth)"
+      ],
+      "returns": "TABLE with metric_name, ranking_score, latest_value, average_value, growth_rate, volatility, rank_position",
+      "usage": "get_top_metrics(metrics_data_jsonb, 5, 'growth')",
+      "example": "SELECT * FROM get_top_metrics('{\"revenue\":[{\"time\":\"2024-01-01\",\"value\":100},{\"time\":\"2024-01-02\",\"value\":110}],\"costs\":[{\"time\":\"2024-01-01\",\"value\":50}]}'::JSONB, 5, 'growth');"
+    },
+    "calculate_cumulative_trend": {
+      "description": "Calculate cumulative values over time (sum, avg, max, min). From trend_analysis_functions - input uses 'metric' field. Returns cumulative percentages. Note: Same name as timeseries calculate_cumulative which uses 'value' field.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}",
+        "p_cumulative_type: sum|avg|max|min (default sum)"
+      ],
+      "returns": "TABLE with time_period, period_value, cumulative_value, cumulative_percent",
+      "usage": "calculate_cumulative(data_with_metric_jsonb, 'sum')",
+      "example": "SELECT * FROM calculate_cumulative('[{\"time\":\"2024-01-01\",\"metric\":10},{\"time\":\"2024-01-02\",\"metric\":20},{\"time\":\"2024-01-03\",\"metric\":15}]'::JSONB, 'sum');"
+    },
+    "classify_trend": {
+      "description": "Comprehensive trend classification with velocity and acceleration. Provides actionable recommendations.",
+      "parameters": [
+        "p_data: JSONB array of {time, metric}"
+      ],
+      "returns": "TABLE with overall_trend, trend_strength, direction_consistency, velocity, acceleration, recommendation",
+      "usage": "classify_trend(data_jsonb)",
+      "example": "SELECT * FROM classify_trend('[{\"time\":\"2024-01-01\",\"metric\":100},{\"time\":\"2024-01-02\",\"metric\":110},{\"time\":\"2024-01-03\",\"metric\":120},{\"time\":\"2024-01-04\",\"metric\":125},{\"time\":\"2024-01-05\",\"metric\":135}]'::JSONB);"
+    }
+  },
+  "source_files": [
+    "02_correlation_decomposition.sql",
+    "moving_averages_functions.sql",
+    "operations_functions.sql",
+    "timeseries_analysis_functions.sql",
+    "trend_analysis_functions.sql"
+  ],
+  "note": "Likelihood and impact entries were removed from this vendored catalog; use custom SQL/services if needed. SQL examples are derived from COMMENT blocks and usage sections in each source file."
+}

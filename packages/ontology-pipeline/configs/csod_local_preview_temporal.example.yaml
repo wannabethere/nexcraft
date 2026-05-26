@@ -1,0 +1,126 @@
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  WHICH FILE IS THIS?                                                 ║
+# ║                                                                      ║
+# ║  This is a TemporalJobSpec — top-level keys are `workflow_type:`,    ║
+# ║  `task_queue:`, `temporal_target:`, `input:`.                        ║
+# ║                                                                      ║
+# ║  Submit with:                                                        ║
+# ║      nexcraft-yaml-job run <this file>                               ║
+# ║                                                                      ║
+# ║  DO NOT submit this via `ontology-pipeline run --config` — that      ║
+# ║  expects a flat PipelineConfig (no envelope). For the in-process     ║
+# ║  variant, use the sibling file:                                      ║
+# ║      configs/csod_local_preview.example.yaml                         ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+#
+# Local-preview run, submitted as a Temporal job via nexcraft-jobs.
+#
+# Same offline run as `csod_local_preview.example.yaml`, but driven by the
+# Temporal workflow + activities instead of an in-process call. Every
+# artifact still lands under `output/preview/` for inspection — Temporal
+# is just the orchestrator.
+#
+# What you get vs. the in-process run:
+#   - Per-table activities run in parallel (capped by per_table_concurrency).
+#   - Per-activity retry with exponential backoff (transient failures
+#     don't kill the whole run).
+#   - Temporal UI shows every activity's input / output / wall time.
+#   - Long-running runs become resumable.
+#
+# Prerequisites:
+#   - Temporal running on localhost:7233 (host-provided).
+#       `temporal server start-dev`     # or via docker
+#   - ontology-pipeline Temporal worker running in another terminal:
+#       python -m ontology_pipeline.temporal.worker --task-queue ontology-pipeline-default
+#   - CSOD data on disk. Set NEXCRAFT_DATA + NEXCRAFT_OUT before submitting:
+#       export NEXCRAFT_DATA=/abs/path/to/nexcraft/data
+#       export NEXCRAFT_OUT=/abs/path/to/nexcraft/output
+#     The YAML loader expands ${NEXCRAFT_DATA} / ${NEXCRAFT_OUT} at submit
+#     time — set them in the terminal that runs `nexcraft-yaml-job`, not
+#     in the worker's environment (the worker only sees resolved paths).
+#   - `nexcraft-yaml-job` CLI installed and pointed at the same Temporal target.
+#
+# Submit:
+#   nexcraft-yaml-job run packages/ontology-pipeline/configs/csod_local_preview_temporal.example.yaml
+#
+# (The package is called `nexcraft-jobs` but the installed CLI binary is
+# `nexcraft-yaml-job` — singular. `which nexcraft-jobs` will not find anything.)
+#
+# Or programmatically (see nexcraft_jobs.yaml_jobs.runner.run_job_spec):
+#   from nexcraft_jobs.yaml_jobs.loader import load_job_file
+#   from nexcraft_jobs.yaml_jobs.runner import run_job_spec
+#   await run_job_spec(load_job_file("configs/csod_local_preview_temporal.example.yaml"))
+
+version: 1
+name: csod-local-preview
+workflow_type: ontology_ingestion        # matches @workflow.defn(name=...)
+task_queue: ontology-pipeline-default
+temporal_target: localhost:7233
+workflow_id_prefix: csod-local-preview
+wait_for_result: true
+
+input:
+  source:
+    source_id: csod-local
+    org_id: csod
+    kind: local_files
+    schemas: [public]
+    local:
+      # Use absolute paths via env-var expansion. The submitter side
+      # (`nexcraft-yaml-job run ...`) resolves $-bracket-VAR-bracket
+      # references at load time -- set
+      # `export NEXCRAFT_DATA=/abs/path/to/nexcraft/data` in the terminal
+      # that runs the submitter (not the worker's environment).
+      schema_sql: ${NEXCRAFT_DATA}/indexingsamples/schema.sql
+      data_dir:   ${NEXCRAFT_DATA}/indexingsamples
+      manifest:   ${NEXCRAFT_DATA}/indexingsamples/manifest.json
+      catalog_name: csod_learning
+
+  semantic_layer:
+    cards_dir: ${NEXCRAFT_DATA}/semantic_layer
+    key_areas_vocab_path: ${NEXCRAFT_DATA}/semantic_layer/key_areas_vocab.yaml
+  # Optional table filter — comment out to process all 11 CSOD tables.
+  # tables:
+  #   include: [users_core, training_core, transcript_core]
+
+  output:
+    kind: preview
+    # Absolute path via env-var expansion — see header note. Avoids the
+    # CWD trap where a nohup'd worker resolves `./output/preview` against
+    # wherever it was started.
+    base_dir: ${NEXCRAFT_OUT}/preview
+
+  llm:
+    # Required only when LLM stages are enabled below. The defaults match
+    # the project's DeepSeek V3 setup; switch to OpenAI by editing model +
+    # api_key_env. Leave alone if every LLM stage is off.
+    provider: openai
+    model: deepseek-chat
+    api_key_env: DEEPSEEK_API_KEY
+    base_url_env: DEEPSEEK_BASE_URL
+    base_url_default: https://api.deepseek.com
+
+  pipeline:
+    # ── Deterministic stages (no LLM, no network) ──
+    compute_column_stats: true        # foundry profiling over the CSVs
+    column_stats_sample_limit: 500
+
+    # ── LLM-driven stages: off by default. Flip on incrementally to
+    #    validate one at a time. Set DEEPSEEK_API_KEY before enabling. ──
+    fill_descriptions: true
+    rich_description: true
+    enrich_column_semantics: true
+    enrich_data_protection: true
+    infer_relationships: true
+    enrich_causal_dependencies: true
+    enrich_cross_asset_causal: true
+    induce_relation_schema: true
+    annotate: true
+    concepts_source: ner_then_llm          # NER-only annotation = no LLM call
+
+    re_enrich_unchanged: true
+
+  # Workflow-only knob: per-table activities run in parallel up to this cap.
+  # Each table is its own retryable activity, so 4 in parallel means 4
+  # process_one_table activities can be in-flight at once.
+  per_table_concurrency: 4

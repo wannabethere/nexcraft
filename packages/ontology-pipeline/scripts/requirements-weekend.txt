@@ -1,0 +1,9 @@
+# Optional deps for scripts/weekend_bench.py (install in a venv)
+openai>=1.50
+anthropic>=0.40
+google-genai>=1.0
+langchain-core>=0.3
+langchain-openai>=0.2
+langchain-anthropic>=0.3
+langchain-google-genai>=2.0
+matplotlib>=3.8

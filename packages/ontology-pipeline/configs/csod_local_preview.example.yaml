@@ -1,0 +1,97 @@
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  WHICH FILE IS THIS?                                                 ║
+# ║                                                                      ║
+# ║  This is the IN-PROCESS PipelineConfig — top-level keys are          ║
+# ║  `source:`, `output:`, `pipeline:`, etc.                             ║
+# ║                                                                      ║
+# ║  Submit with:                                                        ║
+# ║      ontology-pipeline run --config <this file>                      ║
+# ║                                                                      ║
+# ║  DO NOT submit this via `nexcraft-yaml-job run` — that expects a     ║
+# ║  TemporalJobSpec envelope with `workflow_type:` / `task_queue:`.     ║
+# ║  For the Temporal-driven preview, use the sibling file:              ║
+# ║      configs/csod_local_preview_temporal.example.yaml                ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+#
+# Local-preview pipeline run against the CSOD dataset.
+# No Postgres. No Qdrant. No Temporal. Pure offline — runs in your terminal.
+#
+# Reads:
+#   - SQL DDL          → ontology_pipeline.introspect_sql.SqlFileIntrospector
+#   - CSV data         → ontology_pipeline.profile.CsvSampleLoader
+#   - Manifest (PK/FK) → augments the introspector
+#
+# Writes everything to `./output/preview/`:
+#   - MDL JSON, annotations, column stats, etc. (FilesystemSink behavior)
+#   - Postgres-bound rows under `output/preview/postgres/<table>/<rk>.json`
+#   - Qdrant-bound event payloads under `output/preview/qdrant/<collection>/<event_id>.json`
+#   - `output/preview/reindex_queue.jsonl` — one line per task that WOULD enqueue
+#
+# Run via the existing CLI:
+#   ontology-pipeline run --config configs/csod_local_preview.example.yaml
+#
+# Or programmatically:
+#   from ontology_pipeline import PipelineConfig, run
+#   run(PipelineConfig.load("configs/csod_local_preview.example.yaml"))
+
+source:
+  source_id: csod-local
+  org_id: csod
+  kind: local_files
+  schemas: [public]
+  local:
+    schema_sql: ../../data/indexingsamples/schema.sql
+    data_dir:   ../../data/indexingsamples
+    manifest:   ../../data/indexingsamples/manifest.json
+    catalog_name: csod_learning   # used in the asset_rk
+    # ── Note on paths ─────────────────────────────────────────────────
+    # Relative paths above work when you run the in-process pipeline
+    # from `packages/ontology-pipeline/`:
+    #     cd packages/ontology-pipeline
+    #     ontology-pipeline run --config configs/csod_local_preview.example.yaml
+    # For the Temporal-driven preview (which may be nohup'd from a
+    # different CWD), use absolute paths or ENV_VAR expansion — see
+    # `configs/csod_local_preview_temporal.example.yaml`.
+
+# Optional table filter — comment out to process all 11 CSOD tables.
+# tables:
+#   include: [users_core, training_core, transcript_core]
+
+# Optional semantic layer (omit this block entirely, or set paths below).
+# semantic_layer:
+#   cards_dir: ./semantic_layer
+#   key_areas_vocab_path: ./semantic_layer/key_areas_vocab.yaml
+
+output:
+  kind: preview
+  base_dir: ./output/preview
+
+llm:
+  # Required when ANY LLM-using stage is enabled (see pipeline.* below).
+  # Default is DeepSeek V3 via the OpenAI-compatible client — set
+  # DEEPSEEK_API_KEY in your environment, or switch all LLM stages off
+  # below for a fully offline run.
+  provider: openai
+  model: deepseek-chat
+  api_key_env: DEEPSEEK_API_KEY
+  base_url_env: DEEPSEEK_BASE_URL
+  base_url_default: https://api.deepseek.com
+
+pipeline:
+  # ── Stages requiring an LLM (set to false if you don't want to spend tokens) ──
+  fill_descriptions: true
+  rich_description: true
+  enrich_column_semantics: true
+  enrich_data_protection: true
+  infer_relationships: true
+  enrich_causal_dependencies: true
+  enrich_cross_asset_causal: true
+  induce_relation_schema: true
+  annotate: true                  # set true with concepts_source=ner_only for LLM-free
+  concepts_source: ner_only        # safe default for offline runs
+
+  # ── Deterministic stages (no LLM; always cheap) ──
+  compute_column_stats: true       # foundry profiling over the CSVs
+  column_stats_sample_limit: 500   # read up to 500 rows per CSV
+
+  re_enrich_unchanged: false

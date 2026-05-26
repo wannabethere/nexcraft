@@ -1,0 +1,7 @@
+# Dev-only dynamic config (mirrors Temporal docker-compose sample).
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}

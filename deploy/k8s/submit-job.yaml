@@ -1,0 +1,39 @@
+# One-shot Temporal client (demo submit). Delete the Job before re-applying:
+#   kubectl delete job nexcraft-demo-submit -n nexcraft
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nexcraft-demo-submit
+  namespace: nexcraft
+  labels:
+    app.kubernetes.io/name: nexcraft-demo-submit
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexcraft-demo-submit
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: submit
+          image: nexcraft-worker:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TEMPORAL_HOST
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            - name: TEMPORAL_NAMESPACE
+              value: default
+            - name: TEMPORAL_TASK_QUEUE
+              value: nexcraft-recipes
+            # Must match the path workers use for nexcraft_recipe_staged
+            - name: NEXCRAFT_STAGING_ROOT
+              value: /var/lib/nexcraft/staging
+          command: ["python", "/app/examples/03_temporal_submit_sketch.py"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: 256Mi
+            limits:
+              memory: 512Mi

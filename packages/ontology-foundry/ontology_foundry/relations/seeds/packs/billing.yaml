@@ -1,0 +1,51 @@
+name: billing
+description: Customer billing, contract, metering, and service interactions.
+source: hand-authored
+version: 1
+seeds:
+  - predicate: has_contract
+    description: Customer holds a contract.
+    preferred_domain: [Customer]
+    preferred_range: [Contract]
+    examples:
+      - "Acme Corp signed contract K-22 last quarter."
+
+  - predicate: has_subscription
+    description: Contract grants a subscription.
+    preferred_domain: [Contract]
+    preferred_range: [Subscription]
+
+  - predicate: has_meter
+    description: Contract is served by a meter.
+    preferred_domain: [Contract]
+    preferred_range: [Meter]
+
+  - predicate: has_reading
+    description: Meter produced a reading.
+    preferred_domain: [Meter]
+    preferred_range: [MeterReading]
+
+  - predicate: has_invoice
+    description: Contract was invoiced.
+    preferred_domain: [Contract]
+    preferred_range: [Invoice]
+
+  - predicate: has_payment
+    description: Invoice was paid.
+    preferred_domain: [Invoice]
+    preferred_range: [Payment]
+
+  - predicate: made_call
+    description: Customer initiated a service call.
+    preferred_domain: [Customer]
+    preferred_range: [ServiceCall]
+
+  - predicate: filed_claim
+    description: Customer filed a claim.
+    preferred_domain: [Customer]
+    preferred_range: [Claim]
+
+  - predicate: has_interaction
+    description: Customer had a logged interaction (chat, email, ticket).
+    preferred_domain: [Customer]
+    preferred_range: [Interaction]

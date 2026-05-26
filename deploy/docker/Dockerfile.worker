@@ -1,0 +1,22 @@
+# Build from repository root:
+#   docker build -f deploy/docker/Dockerfile.worker -t nexcraft-worker:local .
+FROM python:3.11-slim-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY packages/nexcraft /app/packages/nexcraft
+COPY packages/nexcraft-jobs /app/packages/nexcraft-jobs
+COPY examples /app/examples
+
+RUN pip install --no-cache-dir -U pip \
+    && pip install --no-cache-dir -e "/app/packages/nexcraft[postgres,dev]" \
+        -e "/app/packages/nexcraft-jobs[dev]"
+
+ENV PYTHONPATH=/app/examples
+
+# Override with Kubernetes Job or docker compose run for one-shot clients.
+CMD ["python", "/app/examples/run_demo_worker.py"]

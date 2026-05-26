@@ -1,0 +1,61 @@
+# Nexcraft Temporal job: two ODBC hops + DuckDB merge (YAML-driven).
+# Install ODBC stack: uv sync --extra cornerstone (pyodbc).
+#
+# Env: CSOD_SERVER, CSOD_DATABASE, CSOD_UID, CSOD_PWD (or edit literals).
+#
+# Worker:
+#   python packages/nexcraft-jobs/examples/worker_cornerstone_multihop.py
+#
+# Job:
+#   python -m nexcraft_jobs.yaml_jobs run packages/nexcraft-jobs/examples/jobs/cornerstone_multihop.example.yaml
+
+version: 1
+name: cornerstone-training-multihop
+workflow_type: nexcraft_cornerstone_multihop
+task_queue: nexcraft-cornerstone-multihop
+temporal_target: localhost:7233
+workflow_id_prefix: nexcraft-cornerstone-multihop
+wait_for_result: true
+
+input:
+  hop1:
+    odbc_driver: ODBC Driver 17 for SQL Server
+    server: ${CSOD_SERVER}
+    database: ${CSOD_DATABASE}
+    uid: ${CSOD_UID}
+    pwd: ${CSOD_PWD}
+    sql: |
+      SELECT TOP 200
+        User_ID,
+        Division,
+        Position,
+        Manager_Name,
+        Training_Title,
+        Training_Type,
+        Transcript_Status,
+        Assigned_Date,
+        Due_Date,
+        Completed_Date
+      FROM csod_training_records
+
+  hop2:
+    odbc_driver: ODBC Driver 17 for SQL Server
+    server: ${CSOD_SERVER}
+    database: ${CSOD_DATABASE}
+    uid: ${CSOD_UID}
+    pwd: ${CSOD_PWD}
+    sql: |
+      SELECT TOP 200
+        User_ID,
+        Division,
+        Position,
+        Email
+      FROM csod_user_core
+
+  # Optional DuckDB merge override:
+  # combine:
+  #   hop1_table: hop1
+  #   hop2_table: hop2
+  #   combine_sql: |
+  #     SELECT h1.User_ID, h1.Training_Title
+  #     FROM hop1 h1 INNER JOIN hop2 h2 ON CAST(h1.User_ID AS VARCHAR) = CAST(h2.User_ID AS VARCHAR)

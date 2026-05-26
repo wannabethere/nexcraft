@@ -1,0 +1,49 @@
+name: common
+description: Domain-agnostic relation predicates useful in almost any corpus.
+source: hand-authored
+version: 1
+seeds:
+  - predicate: has_part
+    description: Whole-to-part composition.
+    examples:
+      - "A contract has parts: subscription, meter, invoice."
+
+  - predicate: member_of
+    description: Element belongs to a group, collection, or organization.
+    examples:
+      - "Alice is a member of the Security team."
+
+  - predicate: located_in
+    description: Spatial containment.
+    examples:
+      - "The office is located in Seattle."
+
+  - predicate: occurred_at
+    description: Temporal anchor of an event.
+    examples:
+      - "Payment P-300 occurred at 2026-04-30."
+
+  - predicate: caused_by
+    description: Causal antecedent — A happened because B happened.
+    examples:
+      - "Outage caused by misconfiguration."
+
+  - predicate: mentions
+    description: Document or chunk references an entity.
+    examples:
+      - "The report mentions Acme Corp."
+
+  - predicate: succeeded_by
+    description: Ordered sequence — B follows A.
+    examples:
+      - "Contract v1 succeeded by Contract v2."
+
+  - predicate: attributed_to
+    description: Authorship or responsibility.
+    examples:
+      - "Claim attributed_to underwriter Jane Doe."
+
+  - predicate: has_attribute
+    description: Entity carries a named attribute or property.
+    examples:
+      - "Customer Acme has_attribute tier=Gold."
