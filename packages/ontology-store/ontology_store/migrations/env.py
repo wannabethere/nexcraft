@@ -29,7 +29,10 @@ if not config.get_main_option("sqlalchemy.url"):
             "ONTOLOGY_STORE_URL env var must be set "
             "(or sqlalchemy.url in alembic.ini) before running migrations"
         )
-    config.set_main_option("sqlalchemy.url", db_url)
+    # Escape % so ConfigParser interpolation doesn't choke on percent-encoded
+    # passwords (e.g. ...%24...%25...). ConfigParser de-escapes %% → % on read,
+    # so SQLAlchemy still receives the correct URL.
+    config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

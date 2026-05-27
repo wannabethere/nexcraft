@@ -75,6 +75,7 @@ class HierarchyDAO:
         if existing is None:
             row = Organization(**payload)
             self.s.add(row)
+            self.s.flush()  # flush now (session is autoflush=False) so same-session get() sees it
             self._audit("create", "T0", org.org_id, new_value=payload)
             return row
         # Update in place
@@ -92,6 +93,7 @@ class HierarchyDAO:
         if existing is None:
             row = Source(**payload)
             self.s.add(row)
+            self.s.flush()  # flush now (session is autoflush=False) so upsert_mdl_document's get(Source) sees it
             self._audit("create", "T1", source.source_id, new_value=payload)
             return row
         for k, v in payload.items():

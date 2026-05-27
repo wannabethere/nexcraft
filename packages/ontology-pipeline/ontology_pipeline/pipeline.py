@@ -274,6 +274,13 @@ def _process_table(
             )
             column_rk_by_name = {c.name: c.rk for c in mdl.models[0].columns}
             if tabular_bundle is not None:
+                # column_stat/table_stat FK to the spine, so the MDL must be persisted
+                # FIRST. Write the spine up front (idempotent — the fully-enriched MDL is
+                # re-upserted at the end). Only runs when profiling will persist stats.
+                sink.write_mdl(
+                    source_id=config.source.source_id,
+                    schema=table.schema_name, table=table.name, mdl=mdl,
+                )
                 _persist_aggregates(
                     sink=sink, source_id=config.source.source_id,
                     schema=table.schema_name, table_name=table.name,

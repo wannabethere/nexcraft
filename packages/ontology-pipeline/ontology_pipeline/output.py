@@ -324,6 +324,7 @@ class HierarchyStoreSink:
 
         with self._db.session() as session:
             dao = HierarchyDAO(session, actor=self._actor)
+            _ensured_source = False
             if self._ensure_org_source and source_id not in self._seen_sources:
                 # Ensure the Organization + Source rows exist; idempotent.
                 dao.upsert_organization(OrganizationIn(
@@ -336,8 +337,13 @@ class HierarchyStoreSink:
                     instance_name=source_id,
                     display_name=source_id,
                 ))
-                self._seen_sources.add(source_id)
+                _ensured_source = True
             dao.upsert_mdl_document(store_doc)
+        # Mark the source seen only AFTER the session commits — otherwise a failed
+        # write_mdl would roll back the source insert but leave it flagged, and every
+        # later table would skip the upsert and hit "Source not found".
+        if _ensured_source:
+            self._seen_sources.add(source_id)
 
         # No file is written; return a synthetic path for the return-type contract.
         synth = self.base_dir() / "mdl" / source_id / schema / f"{table}.json.virtual"

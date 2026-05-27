@@ -124,9 +124,22 @@ class ColumnStatDAO:
             ts.updated_at = now
 
         # ── column_stat ──────────────────────────────────────────────────
+        # Only attach stats to columns that exist in column_metadata; synthetic /
+        # profiler-only columns (e.g. _last_touched_dt_utc), or a spine not yet
+        # written, would violate column_stat_column_rk_fkey. Skip the unknowns.
+        from sqlalchemy import select as _select
+        from ontology_store.db.models import ColumnMetadata as _ColumnMetadata
+        _rks = [a.column_rk for a in aggregates]
+        _known = set(self.s.scalars(
+            _select(_ColumnMetadata.rk).where(_ColumnMetadata.rk.in_(_rks))
+        ).all()) if _rks else set()
         inserted = 0
         updated = 0
+        skipped = 0
         for agg in aggregates:
+            if agg.column_rk not in _known:
+                skipped += 1
+                continue
             if agg.cardinality_tier is not None and agg.cardinality_tier not in CARDINALITY_TIERS:
                 raise ValueError(
                     f"Invalid cardinality_tier {agg.cardinality_tier!r}; "
@@ -167,12 +180,17 @@ class ColumnStatDAO:
                 row.stats_are_approximate = agg.stats_are_approximate
                 row.updated_at = now
                 updated += 1
+        if skipped:
+            logger.debug(
+                "upsert_aggregates: skipped %d column(s) with no column_metadata row (table_rk=%s)",
+                skipped, table_rk,
+            )
         self._audit(
             action="upsert_aggregates",
             entity_uid=f"table_stat:{table_rk}",
-            new_value={"columns_inserted": inserted, "columns_updated": updated},
+            new_value={"columns_inserted": inserted, "columns_updated": updated, "columns_skipped": skipped},
         )
-        return {"inserted": inserted, "updated": updated}
+        return {"inserted": inserted, "updated": updated, "skipped": skipped}
 
     # ── Phase 2: PII-gated sample values ───────────────────────────────
 
