@@ -60,18 +60,18 @@ class _CrossAssetCandidate(BaseModel):
     subject_asset_name: str = Field(
         description="Short name of the subject (cause) asset, e.g. 'users_core'.",
     )
-    subject_column: str = Field(
+    subject_column: str | None = Field(
         default="",
-        description="Column in subject asset that anchors the cause. Empty when the asset is the cause as a whole.",
+        description="Column in subject asset that anchors the cause. Empty/null when the asset is the cause as a whole.",
     )
     predicate: str = Field(description=f"One of: {', '.join(CAUSAL_PREDICATES)}")
     object_asset_name: str | None = Field(
         default=None,
         description="Short name of the object (effect) asset when the effect is another asset. None when object_causal_node_id is used.",
     )
-    object_column: str = Field(
+    object_column: str | None = Field(
         default="",
-        description="Column in object asset that anchors the effect. Empty when the asset is the effect as a whole.",
+        description="Column in object asset that anchors the effect. Empty/null when the asset is the effect as a whole.",
     )
     object_causal_node_id: str | None = Field(
         default=None,

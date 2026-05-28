@@ -244,6 +244,9 @@ class HierarchyDAO:
             tbl.schema_rk = schema_rk
             tbl.is_view = model.is_view
             self._audit("update", "T4", model.rk)
+        # Persist table_metadata before its dependents (table_ext, column_metadata,
+        # *_description, lineage_edge) — session is autoflush=False.
+        self.s.flush()
 
         # Enqueue Qdrant reindex for this asset.
         # Importing lazily to avoid a hard runtime dep when the workers module
@@ -335,6 +338,10 @@ class HierarchyDAO:
             existing.name = col.name  # type: ignore[attr-defined]
             existing.col_type = col.type  # type: ignore[attr-defined]
             existing.is_nullable = not col.notNull  # type: ignore[attr-defined]
+        # Persist column_metadata NOW so the column_ext / *_description FKs below
+        # resolve (session is autoflush=False; otherwise the column_ext insertmany
+        # can run before column_metadata and violate column_ext_column_rk_fkey).
+        self.s.flush()
 
         props = col.properties  # type: ignore[attr-defined]
 
@@ -403,6 +410,11 @@ class HierarchyDAO:
                 confidence=confidence, evidence_ref=evidence_ref,
                 active=True,
             ))
+            # flush now (session is autoflush=False) so a repeat edge later in THIS
+            # session — e.g. two columns of the same table referencing the same target —
+            # is found by the existence check above instead of duplicate-inserting
+            # (uq_lineage_edge_path_kind).
+            self.s.flush()
         else:
             existing.active = True
             existing.confidence = confidence if confidence is not None else existing.confidence
