@@ -12,6 +12,7 @@ from ontology_store.schemas.mdl import (
 from ontology_store.schemas.retrieval import (
     AssetHit,
     AssetSearchFilters,
+    FieldContext,
     RetrievalScope,
     TableContext,
     TableContextColumn,
@@ -30,6 +31,7 @@ __all__ = [
     "AssetAnnotations",
     "TableContext",
     "TableContextColumn",
+    "FieldContext",
     "AssetHit",
     "AssetSearchFilters",
     "RetrievalScope",

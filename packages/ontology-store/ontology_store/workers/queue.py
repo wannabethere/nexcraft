@@ -240,3 +240,25 @@ def enqueue_card_reindex(session: Session, *, tenant_id: str, card_id: str, kind
         task_kind=TaskKind.QDRANT_CARD,
         payload={"tenant_id": tenant_id, "card_id": card_id, "card_kind": kind},
     )
+
+
+def enqueue_field_reindex(
+    session: Session,
+    *,
+    column_rk: str,
+    parent_rk: str,
+    field_kind: str = "column",
+) -> int:
+    """Enqueue a Qdrant reindex task for a column / field.
+
+    Mirrors :func:`enqueue_asset_reindex`. The reindex worker hydrates
+    ``column_rk`` via :class:`FieldReader` at drain time.
+    """
+    return QueueDAO(session).enqueue(
+        task_kind=TaskKind.QDRANT_FIELD,
+        payload={
+            "column_rk": column_rk,
+            "parent_rk": parent_rk,
+            "field_kind": field_kind,
+        },
+    )

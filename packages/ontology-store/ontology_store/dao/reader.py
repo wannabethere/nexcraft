@@ -27,8 +27,10 @@ from ontology_store.db.models import (
     TableMetadata,
     TableProgrammaticDescription,
 )
+from ontology_store.db.stats_models import ColumnStat
 from ontology_store.schemas import (
     AssetHit,
+    FieldContext,
     RetrievalScope,
     TableContext,
     TableContextColumn,
@@ -271,6 +273,83 @@ class AssetReader:
         return out
 
     def _best_column_description(self, column_rk: str) -> tuple[str | None, str | None]:
+        stmt = select(ColumnDescription).where(ColumnDescription.column_rk == column_rk).limit(1)
+        row = self.s.execute(stmt).scalar_one_or_none()
+        if row is not None:
+            return row.description, row.source
+        stmt = (
+            select(ColumnProgrammaticDescription)
+            .where(ColumnProgrammaticDescription.column_rk == column_rk)
+            .limit(1)
+        )
+        row = self.s.execute(stmt).scalar_one_or_none()
+        if row is not None:
+            return row.description, row.source
+        return None, None
+
+
+class FieldReader:
+    """Field-side (T5) reads for the reindex worker.
+
+    Symmetric to :class:`AssetReader`. Hydrates a single column_rk into a
+    :class:`FieldContext` by joining column_metadata + column_ext +
+    best_description + column_stat + parent breadcrumb (table → schema →
+    cluster → source). The reindex worker calls :py:meth:`get_field` per
+    queued ``qdrant_field`` task.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.s = session
+
+    def get_field(self, column_rk: str) -> FieldContext | None:
+        """Hydrate a column by rk. Returns None if the column was deleted."""
+        stmt = (
+            select(ColumnMetadata, ColumnExt, TableMetadata, SchemaMetadata)
+            .join(ColumnExt, ColumnExt.column_rk == ColumnMetadata.rk, isouter=True)
+            .join(TableMetadata, TableMetadata.rk == ColumnMetadata.table_rk)
+            .join(SchemaMetadata, SchemaMetadata.rk == TableMetadata.schema_rk)
+            .where(ColumnMetadata.rk == column_rk)
+        )
+        row = self.s.execute(stmt).first()
+        if row is None:
+            return None
+        col, ext, tbl, schema = row
+
+        desc, prov = self._best_column_description(column_rk)
+        stat = self.s.execute(
+            select(ColumnStat).where(ColumnStat.column_rk == column_rk).limit(1),
+        ).scalar_one_or_none()
+        source_id = _source_id_from_cluster_rk(schema.cluster_rk)
+
+        return FieldContext(
+            column_rk=col.rk,
+            name=col.name,
+            col_type=col.col_type,
+            is_nullable=col.is_nullable,
+            sort_order=col.sort_order,
+            description=desc,
+            description_provenance=prov,
+            display_name=(ext.display_name if ext else None),
+            purpose=(ext.purpose if ext else None),
+            is_pii=(ext.is_pii if ext else False),
+            pii_categories=list(ext.pii_categories) if ext and ext.pii_categories else [],
+            is_business_key=(ext.is_business_key if ext else False),
+            semantic_unit=(ext.semantic_unit if ext else None),
+            sensitivity_class=(ext.sensitivity_class if ext else None),
+            references_path=(ext.references_path if ext else None),
+            cardinality_tier=(stat.cardinality_tier if stat else None),
+            null_rate=(stat.null_rate if stat else None),
+            distinct_count=(stat.distinct_count if stat else None),
+            parent_rk=tbl.rk,
+            parent_name=tbl.name,
+            schema_rk=schema.rk,
+            schema_name=schema.name,
+            source_id=source_id,
+            field_kind="column",
+        )
+
+    def _best_column_description(self, column_rk: str) -> tuple[str | None, str | None]:
+        """Same provenance rule as AssetReader: user → programmatic → None."""
         stmt = select(ColumnDescription).where(ColumnDescription.column_rk == column_rk).limit(1)
         row = self.s.execute(stmt).scalar_one_or_none()
         if row is not None:

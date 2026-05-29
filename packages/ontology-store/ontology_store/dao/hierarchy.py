@@ -368,6 +368,15 @@ class HierarchyDAO:
                 setattr(ext_existing, k, v)
             ext_existing.updated_at = datetime.now(timezone.utc)
 
+        # Enqueue Qdrant reindex for this column (T5). Same lazy-import
+        # pattern as the asset enqueue above — DAO consumers without the
+        # workers extra still work.
+        try:
+            from ontology_store.workers.queue import enqueue_field_reindex
+            enqueue_field_reindex(self.s, column_rk=rk, parent_rk=table_rk)
+        except Exception as exc:
+            logger.debug("Skipping field reindex enqueue for %s: %s", rk, exc)
+
     def _upsert_description(self, *, asset_rk: str, description: str, source: str, target: str) -> None:
         """Idempotent write to {table|column}_description / _programmatic_description by source."""
         rk = f"{asset_rk}::desc::{source}"

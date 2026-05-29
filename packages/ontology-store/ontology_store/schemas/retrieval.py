@@ -94,3 +94,44 @@ class AssetHit(BaseModel):
     key_areas: list[str] = Field(default_factory=list)
     causal_relations: list[str] = Field(default_factory=list)
     lifecycle_stage: str = "production"
+
+
+class FieldContext(BaseModel):
+    """A hydrated field/column for T5 reindex.
+
+    Joins column_metadata + column_ext + best column_description +
+    column_stat. The reindex worker uses this to build the T5 vector payload
+    + narrative; the asset/schema/source breadcrumb is included so HIER_T5
+    payload_filters that reference parent context resolve without an extra
+    query at index time.
+    """
+    column_rk: str
+    name: str
+    col_type: str
+    is_nullable: bool = True
+    sort_order: int | None = None
+    description: str | None = None
+    description_provenance: str | None = None
+
+    # column_ext
+    display_name: str | None = None
+    purpose: str | None = None
+    is_pii: bool = False
+    pii_categories: list[str] = Field(default_factory=list)
+    is_business_key: bool = False
+    semantic_unit: str | None = None
+    sensitivity_class: str | None = None
+    references_path: str | None = None
+
+    # column_stat (foundry profiling output — may be unset)
+    cardinality_tier: str | None = None  # low / medium / high / identifier
+    null_rate: float | None = None
+    distinct_count: int | None = None
+
+    # Parent breadcrumb
+    parent_rk: str
+    parent_name: str
+    schema_rk: str
+    schema_name: str
+    source_id: str
+    field_kind: str = "column"  # column | api_field | function_parameter | metric_dimension

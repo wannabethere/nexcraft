@@ -94,12 +94,16 @@ _LIVE_PG = bool(os.environ.get("ONTOLOGY_STORE_TEST_URL"))
 class _StubIndexer:
     """Records calls so tests can verify what the worker tried to upsert."""
     upsert_asset_calls: list[dict] = field(default_factory=list)
+    upsert_field_calls: list[dict] = field(default_factory=list)
     upsert_source_calls: list[dict] = field(default_factory=list)
     upsert_schema_calls: list[dict] = field(default_factory=list)
     upsert_card_calls: list[dict] = field(default_factory=list)
 
     def upsert_asset(self, asset_rk: str, text: str, payload: dict) -> None:
         self.upsert_asset_calls.append({"rk": asset_rk, "text": text, "payload": payload})
+
+    def upsert_field(self, field_rk: str, text: str, payload: dict) -> None:
+        self.upsert_field_calls.append({"rk": field_rk, "text": text, "payload": payload})
 
     def upsert_source(self, source_id: str, text: str, payload: dict) -> None:
         self.upsert_source_calls.append({"rk": source_id, "text": text, "payload": payload})
@@ -196,17 +200,69 @@ class TestReindexWorkerE2E:
         indexer = _StubIndexer()
         worker = ReindexWorker(database=db, indexer=indexer)
         stats = worker.run_once()
-        assert stats.processed == 1
-        assert stats.succeeded == 1
+        # One asset task + one field task (the MDL has one column).
+        assert stats.processed == 2
+        assert stats.succeeded == 2
         assert len(indexer.upsert_asset_calls) == 1
         call = indexer.upsert_asset_calls[0]
         assert call["rk"] == "postgres://acme-pg.testdb/public/csod_employee"
         # The payload must include the org_id resolved via Source
         assert call["payload"]["org_id"] == "acme-corp"
+        # Field reindex landed too — single column → single point.
+        assert len(indexer.upsert_field_calls) == 1
+        fcall = indexer.upsert_field_calls[0]
+        assert fcall["rk"] == "postgres://acme-pg.testdb/public/csod_employee/employee_id"
+        assert fcall["payload"]["parent_rk"] == "postgres://acme-pg.testdb/public/csod_employee"
+        assert fcall["payload"]["field_kind"] == "column"
+        assert fcall["payload"]["org_id"] == "acme-corp"
+        # is_primary_key=True on the MDL column → is_business_key=True downstream
+        assert fcall["payload"]["is_business_key"] is True
 
-        # Queue should be empty (task marked done)
+        # Queue should be empty (both tasks marked done)
         with db.session() as s:
             assert QueueDAO(s).depth(status="pending") == 0
+
+    def test_mdl_write_enqueues_qdrant_field_task_per_column(self, db) -> None:
+        """Every column upserted via MDL triggers a qdrant_field reindex task."""
+        from ontology_store import (
+            HierarchyDAO, MDLColumn, MDLColumnProperties, MDLDocument,
+            MDLMaterialization, MDLModel, OrganizationIn, SourceIn,
+        )
+        from ontology_store.workers.queue import QueueDAO, TaskKind
+
+        with db.session() as s:
+            h = HierarchyDAO(s)
+            h.upsert_organization(OrganizationIn(org_id="acme-corp", display_name="Acme"))
+            h.upsert_source(SourceIn(
+                source_id="acme-pg", org_id="acme-corp", kind="postgres",
+                instance_name="Acme PG Test", display_name="Acme PG Test",
+            ))
+            mdl = MDLDocument(
+                mdl_version="2.0", source_id="acme-pg", catalog="testdb", schema="public",
+                models=[MDLModel(
+                    name="csod_employee", rk="postgres://acme-pg.testdb/public/csod_employee",
+                    is_view=False, tableReference={"table": "csod_employee"},
+                    materialization=MDLMaterialization(kind="table", is_materialized=False),
+                    columns=[
+                        MDLColumn(
+                            name="employee_id", type="INTEGER",
+                            rk="postgres://acme-pg.testdb/public/csod_employee/employee_id",
+                            properties=MDLColumnProperties(is_primary_key=True),
+                        ),
+                        MDLColumn(
+                            name="department", type="TEXT",
+                            rk="postgres://acme-pg.testdb/public/csod_employee/department",
+                            properties=MDLColumnProperties(),
+                        ),
+                    ],
+                )],
+            )
+            h.upsert_mdl_document(mdl)
+
+        with db.session() as s:
+            dao = QueueDAO(s)
+            assert dao.depth(status="pending", task_kind=TaskKind.QDRANT_ASSET.value) == 1
+            assert dao.depth(status="pending", task_kind=TaskKind.QDRANT_FIELD.value) == 2
 
     def test_unknown_task_kind_is_skipped_not_blocking(self, db) -> None:
         from ontology_store.workers import ReindexWorker

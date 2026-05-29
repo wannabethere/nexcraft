@@ -18,6 +18,8 @@ from ontology_store.workers.narrative import (
     build_asset_payload,
     build_card_narrative,
     build_card_payload,
+    build_field_narrative,
+    build_field_payload,
     build_schema_narrative,
     build_schema_payload,
     build_source_narrative,
@@ -31,6 +33,7 @@ from ontology_store.workers.queue import (
     TaskStatus,
     enqueue_asset_reindex,
     enqueue_card_reindex,
+    enqueue_field_reindex,
 )
 from ontology_store.workers.reindex import ReindexWorker
 
@@ -42,9 +45,12 @@ __all__ = [
     "TaskStatus",
     "enqueue_asset_reindex",
     "enqueue_card_reindex",
+    "enqueue_field_reindex",
     "ReindexWorker",
     "build_asset_narrative",
     "build_asset_payload",
+    "build_field_narrative",
+    "build_field_payload",
     "build_schema_narrative",
     "build_schema_payload",
     "build_source_narrative",

@@ -74,6 +74,100 @@ def build_asset_payload(ctx: TableContext) -> dict[str, Any]:
 
 
 # ───────────────────────────────────────────────────────────────────────────
+# T5 — Field narrative + payload (column-level retrieval points)
+# ───────────────────────────────────────────────────────────────────────────
+
+
+def build_field_narrative(ctx) -> str:
+    """Narrative embedded for a HIER_T5 point.
+
+    Composition matches HIER_T5_FIELDS.narrative_fields: ``name``,
+    ``description``, ``semantic_unit``. The display_name (if richer than the
+    raw column name) leads the snippet so similarity ranks fuzzy-name matches
+    correctly. Parent table name + col_type are appended as breadcrumb so an
+    LLM consumer can join columns back to their table without an extra fetch.
+
+    ``ctx`` is a :class:`ontology_store.schemas.FieldContext`.
+    """
+    parts: list[str] = []
+    head = ctx.display_name or ctx.name
+    parts.append(head)
+    if ctx.col_type:
+        parts.append(f"Type: {ctx.col_type}")
+    if ctx.description:
+        parts.append(ctx.description)
+    if ctx.purpose and ctx.purpose != ctx.description:
+        parts.append("Purpose: " + ctx.purpose)
+    if ctx.semantic_unit:
+        parts.append("Semantic unit: " + ctx.semantic_unit)
+    if ctx.is_pii:
+        cats = ", ".join(ctx.pii_categories) if ctx.pii_categories else "yes"
+        parts.append(f"PII: {cats}")
+    if ctx.references_path:
+        parts.append(f"FK → {ctx.references_path}")
+    parts.append(f"Table: {ctx.schema_name}.{ctx.parent_name}")
+    return "\n".join(p for p in parts if p)
+
+
+def _null_rate_bucket(rate: float | None) -> str | None:
+    """Discretise null_rate into low (<10%) / med (10-50%) / high (>50%).
+
+    Mirrors what HIER_T5_FIELDS.payload_filters declares so Qdrant payload
+    indexes work efficiently. The raw float stays in column_stat for callers
+    that need it.
+    """
+    if rate is None:
+        return None
+    if rate < 0.10:
+        return "low"
+    if rate < 0.50:
+        return "med"
+    return "high"
+
+
+def _distinct_count_bucket(count: int | None, cardinality_tier: str | None) -> str | None:
+    """Bucket distinct_count; promote to 'unique' when cardinality_tier says so."""
+    if cardinality_tier == "identifier":
+        return "unique"
+    if count is None:
+        return None
+    if count < 100:
+        return "low"
+    if count < 10_000:
+        return "med"
+    return "high"
+
+
+def build_field_payload(ctx, *, org_id: str | None = None) -> dict[str, Any]:
+    """Payload for a HIER_T5 field — matches HIER_T5_FIELDS.payload_filters.
+
+    ``org_id`` is threaded in by the reindex worker (looked up from the
+    parent asset's source row) so retrieval can scope a query to one tenant
+    even though T5 is env-shared. Mirrors ``build_asset_payload`` here.
+    """
+    return {
+        "column_rk": ctx.column_rk,
+        "field_kind": ctx.field_kind,
+        "parent_rk": ctx.parent_rk,
+        "name": ctx.name,
+        "is_pii": ctx.is_pii,
+        "pii_categories": list(ctx.pii_categories),
+        "is_business_key": ctx.is_business_key,
+        "semantic_unit": ctx.semantic_unit,
+        "cardinality_tier": ctx.cardinality_tier,
+        "null_rate_bucket": _null_rate_bucket(ctx.null_rate),
+        "distinct_count_bucket": _distinct_count_bucket(
+            ctx.distinct_count, ctx.cardinality_tier,
+        ),
+        # Breadcrumb — denormalised so retrieval doesn't need a join
+        "schema_rk": ctx.schema_rk,
+        "schema_name": ctx.schema_name,
+        "source_id": ctx.source_id,
+        "org_id": org_id,
+    }
+
+
+# ───────────────────────────────────────────────────────────────────────────
 # T3 — Schema narrative + payload (lightweight; consumer uses for navigation)
 # ───────────────────────────────────────────────────────────────────────────
 

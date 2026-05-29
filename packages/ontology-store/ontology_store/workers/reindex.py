@@ -26,7 +26,7 @@ from typing import Any, Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ontology_store.dao.reader import AssetReader
+from ontology_store.dao.reader import AssetReader, FieldReader
 from ontology_store.db.engine import Database
 from ontology_store.db.models import (
     ClusterMetadata,
@@ -38,6 +38,8 @@ from ontology_store.workers.narrative import (
     build_asset_payload,
     build_card_narrative,
     build_card_payload,
+    build_field_narrative,
+    build_field_payload,
     build_schema_narrative,
     build_schema_payload,
     build_source_narrative,
@@ -101,7 +103,7 @@ class ReindexWorker:
         # Per-task-kind handler dispatch
         self._handlers: dict[str, Callable[[Session, QueueTask], None]] = {
             TaskKind.QDRANT_ASSET.value:   self._handle_asset,
-            TaskKind.QDRANT_FIELD.value:   self._handle_field_stub,
+            TaskKind.QDRANT_FIELD.value:   self._handle_field,
             TaskKind.QDRANT_CARD.value:    self._handle_card,
             TaskKind.QDRANT_SOURCE.value:  self._handle_source,
             TaskKind.QDRANT_SCHEMA.value:  self._handle_schema,
@@ -284,9 +286,36 @@ class ReindexWorker:
         point_id = f"{tenant_id}::semantic::{kind}::{card_id}"
         self.indexer.upsert_card(tenant_id, point_id=point_id, body=text, payload=payload)
 
-    def _handle_field_stub(self, session: Session, task: QueueTask) -> None:
-        """T5 field reindex — deferred (column_ext + descriptions wiring needed)."""
-        logger.debug("qdrant_field handler is a v1 stub; task %d treated as no-op", task.queue_id)
+    def _handle_field(self, session: Session, task: QueueTask) -> None:
+        """T5 field reindex: hydrate column → narrative + payload → upsert.
+
+        Mirrors :meth:`_handle_asset`. The ``org_id`` for the field is
+        resolved through the parent breadcrumb (column → table → schema →
+        cluster → source) so HIER_T5 retrieval can scope by tenant even
+        though T5 is an env-shared collection.
+        """
+        column_rk = task.payload.get("column_rk")
+        if not column_rk:
+            logger.warning("qdrant_field task %d missing column_rk; skipping", task.queue_id)
+            return
+        ctx = FieldReader(session).get_field(column_rk)
+        if ctx is None:
+            logger.info(
+                "qdrant_field: column %s no longer in spine; treating as no-op",
+                column_rk,
+            )
+            return
+        # Resolve org_id from the parent's source row. Falls back to None;
+        # downstream payload filters that depend on org_id will simply not
+        # match — same degradation as build_asset_payload + _handle_asset.
+        org_id: str | None = None
+        if ctx.source_id:
+            source_row = session.get(Source, ctx.source_id)
+            if source_row is not None:
+                org_id = source_row.org_id
+        text = build_field_narrative(ctx)
+        payload = build_field_payload(ctx, org_id=org_id)
+        self.indexer.upsert_field(ctx.column_rk, text=text, payload=payload)
 
     def _handle_catalog_stub(self, session: Session, task: QueueTask) -> None:
         """T2 catalog reindex — deferred (full payload + description model)."""
